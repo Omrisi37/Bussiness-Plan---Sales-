@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,10 +8,27 @@ import io
 from google.oauth2 import service_account
 from google.cloud import firestore
 
-# --- Page Config & Chart Styling ---
+# === פונקציות עזר לטעינה בטוחה ל-session_state === #
+def is_json_serializable(value):
+    """בודק אם הערך הוא מסוג שמותר ב-session_state ישירות."""
+    basic_types = (str, int, float, bool, type(None), list, dict)
+    if isinstance(value, basic_types):
+        return True
+    return False
+
+def safe_set_session_state_from_loaded_data(loaded_data):
+    """מעדכן את ה-session_state בערכים טעונים בצורה בטוחה."""
+    for key, value in loaded_data.items():
+        if is_json_serializable(value):
+            st.session_state[key] = value
+        elif isinstance(value, pd.DataFrame):
+            st.session_state[key] = value.to_json()
+        else:
+            st.session_state[key] = str(value)
+
+# --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
-
 
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
@@ -21,108 +36,77 @@ if 'products' not in st.session_state:
 if 'results' not in st.session_state:
     st.session_state.results = {}
 
-# --- Helper Functions ---
+# --- Excel Export ---
 @st.cache_data
 def to_excel(results_dict):
-    """Creates an Excel file from the results dictionary."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Loop ONLY over products
         for product_name, data in results_dict.items():
             if product_name == 'summary':
                 continue
-
             df_acquired_cust_T = data['acquired_customers_plan'].T
             df_lead_plan_T = data['lead_plan'].T
             df_cum_cust_q_T = data["cumulative_customers"].T
             df_validation = data['validation_df']
-            
             for df in [df_acquired_cust_T, df_lead_plan_T, df_cum_cust_q_T]:
                 df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
-
-            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=2, index=True)
+            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=2)
             writer.sheets[product_name].cell(row=1, column=1, value="Acquired New Customers per Quarter")
-            
-            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + 6, index=True)
-            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + 5, column=1, value="Recommended Lead Contact Plan")
-            
-            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 10, index=True)
-            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 9, column=1, value="Cumulative Customers (Quarterly)")
-
-            df_validation.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 14, index=True)
-            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 13, column=1, value="Target vs. Actual Revenue")
-
+            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0]+6)
+            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0]+5, column=1, value="Recommended Lead Contact Plan")
+            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0]+df_lead_plan_T.shape[0]+10)
+            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0]+df_lead_plan_T.shape[0]+9, column=1, value="Cumulative Customers (Quarterly)")
+            df_validation.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0]+df_lead_plan_T.shape[0]+df_cum_cust_q_T.shape[0]+14)
+            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0]+df_lead_plan_T.shape[0]+df_cum_cust_q_T.shape[0]+13, column=1, value="Target vs. Actual Revenue")
         if "summary" in results_dict:
             summary_data = results_dict["summary"]
             summary_revenue_df = summary_data["summary_revenue"]
-            summary_customers_df = summary_data["summary_customers_raw"] # Use raw data
-            
-            summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
+            summary_customers_df = summary_data["summary_customers_raw"]
+            summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2)
             writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
-            
             summary_customers_df_T = summary_customers_df.to_frame("Total Customers").T
             summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
-            summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10, index=True)
+            summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10)
             writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
-
     return output.getvalue()
-# --- Firebase Connection ---
+
+# --- Firebase ---
 @st.cache_resource
 def init_connection():
     try:
         creds_json = dict(st.secrets.firebase)
         creds = service_account.Credentials.from_service_account_info(creds_json)
-        db = firestore.Client(credentials=creds, project=creds_json['project_id'])
-        return db
+        return firestore.Client(credentials=creds, project=creds_json['project_id'])
     except Exception as e:
-        st.error(f"Failed to connect to Firebase. Check your Streamlit Secrets. Error: {e}")
+        st.error(f"Failed to connect to Firebase. Error: {e}")
         return None
 
 db = init_connection()
 
-# --- Helper Functions (Save/Load) ---
+# --- Save/Load ---
 def save_scenario(user_id, scenario_name, data):
     if not db or not user_id or not scenario_name:
         st.sidebar.warning("User ID and Scenario Name are required to save.")
         return
     try:
-        # Whitelist of keys to save - THIS IS THE FIX
-        data_to_save = {'user_id': user_id, 'products': st.session_state.products}
-        
-        # Gather global params
-        global_params = ['sr_Medium', 'ta_Medium', 'sr_Large', 'ta_Large', 'sr_Global', 'ta_Global']
-        for param in global_params:
-            if param in data: data_to_save[param] = data[param]
-
-        # Gather product-specific params
-        product_params = [
-            'is_m', 'is_l', 'is_g', 'mgr', 'pen_y1', 'tt_m', 'tt_l', 'tt_g',
-            'f_m', 'f_l', 'f_g', 'ip_kg', 'pdr', 'price_floor']
-        for i in range(1, 7): product_params.append(f'rev_y{i}')
-
-        for i, product in enumerate(data.get('products', [])):
-            pname_key = f'pname_{i}'
-            if pname_key in data: data_to_save[pname_key] = data[pname_key]
-            
-            for param in product_params:
-                key = f'{param}_{product}'
-                if key in data: data_to_save[key] = data[key]
-        
-        doc_ref = db.collection('users').document(user_id).collection('scenarios').document(scenario_name)
-        doc_ref.set(data_to_save)
+        data_to_save = {k: v for k, v in data.items() if isinstance(k, str) and not k.startswith(('FormSubmitter', 'results', '_'))}
+        db.collection('users').document(user_id).collection('scenarios').document(scenario_name).set(data_to_save)
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
     except Exception as e:
         st.sidebar.error(f"Error saving scenario: {e}")
 
 def get_user_scenarios(user_id):
-    if not db or not user_id: return []
+    if not db or not user_id:
+        return []
     try:
         docs = db.collection('users').document(user_id).collection('scenarios').stream()
         return [""] + [doc.id for doc in docs]
-    except: return [""]
+    except:
+        return [""]
 
 def load_scenario_data(user_id, scenario_name):
-    if not db or not user_id or not scenario_name: return None
+    if not db or not user_id or not scenario_name:
+        return None
     try:
         doc_ref = db.collection('users').document(user_id).collection('scenarios').document(scenario_name)
         doc = doc_ref.get()
@@ -130,13 +114,15 @@ def load_scenario_data(user_id, scenario_name):
             st.sidebar.info(f"Loaded '{scenario_name}'.")
             return doc.to_dict()
         else:
-            st.sidebar.warning("Scenario not found."); return None
+            st.sidebar.warning("Scenario not found.")
+            return None
     except Exception as e:
-        st.sidebar.error(f"Error loading: {e}"); return None
-        
+        st.sidebar.error(f"Error loading: {e}")
+        return None
+
+# --- Calculation Functions ---
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
-    """Main calculation engine for a single product."""
     START_YEAR = 2025
     NUM_YEARS = 6
     years = np.array([START_YEAR + i for i in range(NUM_YEARS)])
@@ -150,8 +136,10 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     pen_rate_df = pd.DataFrame(index=range(1, NUM_YEARS + 1), columns=customer_types)
     for c_type in customer_types:
         total_market_growth_factor = (1 + market_gr / 100) ** (NUM_YEARS - 1)
-        if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
-        else: required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
+        if initial_tons[c_type] == 0:
+            required_pen_growth_factor = 1.0
+        else:
+            required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
         pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
         x, y = [1, 2.5, NUM_YEARS], [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final]
         interp_func = PchipInterpolator(x, y)
@@ -162,27 +150,27 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
             prev_tons, market_growth_factor = tons_per_customer.loc[prev_year, c_type], (1 + market_gr / 100)
             pen_growth_factor = pen_rate_df.loc[year_idx + 1, c_type] / pen_rate_df.loc[year_idx, c_type]
             tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
-            
+
     prices = []
     current_price = ip_kg
     decay_rate = pdr / 100.0
-    for _ in range(len(quarters_index)):
+    for _ in quarters_index:
         prices.append(current_price)
         next_price = current_price * (1 - decay_rate)
         current_price = max(next_price, price_floor)
-        
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
     
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
-    if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
+    if total_focus == 0:
+        return {"error": "Total Sales Focus must be greater than 0."}
     focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
+
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     for i, q_date in enumerate(quarters_index):
-        if i == 0: prev_cumulative = pd.Series(0.0, index=customer_types)
-        else: prev_cumulative = cumulative_customers.iloc[i-1]
+        prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
@@ -193,31 +181,25 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
                 for c_type in customer_types:
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
-    customers_df_quarterly_final = cumulative_customers
+
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
-    
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
     annual_revenue_series.index = years
     annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
-    
     return {
-        "cumulative_customers": customers_df_quarterly_final,
+        "cumulative_customers": cumulative_customers.round().astype(int),
         "annual_revenue": annual_revenue_series,
         "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_per_customer": tons_per_customer, # <-- שורה חדשה
-        "pen_rate_df": pen_rate_df,             # <-- שורה חדשה
+        "tons_per_customer": tons_per_customer,
+        "pen_rate_df": pen_rate_df,
+        "acquired_customers_plan": new_customers_plan.astype(int),
         "error": None
     }
 
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
-    """
-    Calculate required leads per quarter for acquired customers,
-    ensuring perfect quarter alignment by comparing PeriodIndex (quarter level).
-    """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
-
     for q_date, row in acquired_customers_plan.iterrows():
         for c_type in acquired_customers_plan.columns:
             new_cust_count = row[c_type]
@@ -225,67 +207,44 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                 success_rate = success_rates[c_type] / 100.0
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
-
-                # Calculate the target quarter at the Period level
                 target_period = q_date.to_period('Q') - time_ahead_q
-
-                # Find the corresponding timestamp in the index by comparing Periods
                 idx_matches = lead_plan.index[lead_plan.index.to_period('Q') == target_period]
-
                 if len(idx_matches) > 0:
                     lead_plan.loc[idx_matches[0], c_type] += int(leads_to_contact)
-
     return lead_plan.astype(int)
 
-# --- Main App UI ---
+# --- UI and Logic ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
 
 with st.sidebar:
     st.title("Business Plan Controls")
-
     with st.expander("User & Scenarios", expanded=True):
         user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
-        
         if user_id and db:
             saved_scenarios = get_user_scenarios(user_id)
-            
             col_load, col_save = st.columns(2)
             with col_load:
                 if len(saved_scenarios) > 1:
-                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, key="load_scenario_select")
+                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
                     if st.button("Load") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
                         if loaded_data:
                             st.session_state.results = {}
-                            for key, value in loaded_data.items():
-                                st.session_state[key] = value
+                            safe_set_session_state_from_loaded_data(loaded_data)
                             st.rerun()
                 else:
                     st.caption("No scenarios found.")
-            
             with col_save:
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
                 if st.button("Save Current") and scenario_name_to_save:
-                    # Collect all inputs from session state using a whitelist
-                    data_to_save = {'user_id': user_id, 'products': st.session_state.products}
-                    global_params = ['sr_Medium', 'ta_Medium', 'sr_Large', 'ta_Large', 'sr_Global', 'ta_Global']
-                    for param in global_params:
-                        if param in st.session_state: data_to_save[param] = st.session_state[param]
-                    
-                    product_params = [
-                        'is_m', 'is_l', 'is_g', 'mgr', 'pen_y1', 'tt_m', 'tt_l', 'tt_g',
-                        'f_m', 'f_l', 'f_g', 'ip_kg', 'pdr', 'price_floor']
-                    for i in range(1, 7): product_params.append(f'rev_y{i}')
+                    all_inputs = {'user_id': st.session_state.user_id, 'products': st.session_state.products}
+                    for key, value in st.session_state.items():
+                        if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
+                            if not key.startswith('FormSubmitter'):
+                                all_inputs[key] = value
+                    save_scenario(st.session_state.user_id, scenario_name_to_save, all_inputs)
 
-                    for i, product in enumerate(st.session_state.products):
-                        pname_key = f'pname_{i}'
-                        if pname_key in st.session_state: data_to_save[pname_key] = st.session_state[pname_key]
-                        
-                        for param in product_params:
-                            key = f'{param}_{product}'
-                            if key in st.session_state: data_to_save[key] = st.session_state[key]
-                    
-                    save_scenario(user_id, scenario_name_to_save, data_to_save)
+# ... כאן ממשיכים החלקים של ניהול מוצרים, קליטת פרמטרים, הרצה, הצגת טבלאות וגרפים ...
 
     with st.expander("Manage Products"):
         for i, product_name in enumerate(st.session_state.get('products', ["Product A", "Product B"])):
