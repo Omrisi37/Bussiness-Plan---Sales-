@@ -148,14 +148,14 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
 # --- תיקון פונקציית הלידים ---
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
     """
-    Calculate required leads per quarter for acquired customers and
-    place them in the correct previous quarter according to settings.
-    Includes Streamlit debug output.
+    Calculate required leads per quarter for acquired customers,
+    ensuring perfect quarter alignment by comparing PeriodIndex (quarter level).
+    Includes debug output in Streamlit.
     """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
 
-    debug_rows = []  # לאסוף מידע להצגה בסוף
+    debug_rows = []
 
     for q_date, row in acquired_customers_plan.iterrows():
         for c_type in acquired_customers_plan.columns:
@@ -165,29 +165,33 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
 
-                # חישוב רבעון יעד אחורה
-                contact_quarter_period = q_date.to_period('Q') - time_ahead_q
-                contact_quarter = contact_quarter_period.to_timestamp(how='end')
+                # לחשב רבעון יעד ברמת Period
+                target_period = q_date.to_period('Q') - time_ahead_q
 
-                in_index = contact_quarter in lead_plan.index
-                if in_index:
-                    lead_plan.loc[contact_quarter, c_type] += int(leads_to_contact)
+                # לבדוק אם קיים ברמת Period בלבד
+                idx_matches = lead_plan.index[lead_plan.index.to_period('Q') == target_period]
 
-                # הוספת שורת debug
+                if len(idx_matches) > 0:
+                    lead_plan.loc[idx_matches[0], c_type] += int(leads_to_contact)
+                    in_index = True
+                else:
+                    in_index = False
+
                 debug_rows.append({
                     "Acquire Quarter": q_date,
                     "Customer Type": c_type,
                     "New Customers": int(new_cust_count),
                     "Leads Calculated": int(leads_to_contact),
-                    "Target Quarter": contact_quarter,
+                    "Target Quarter (Period)": target_period,
                     "Target in Index?": in_index
                 })
 
-    # הצגת טבלת הדיבאג בסטריםליט
-    st.subheader("🔍 Lead Plan Debug Info")
+    # הצגת טבלת הדיבאג
+    st.subheader("🔍 Lead Plan Debug Info (Quarter Matching)")
     st.dataframe(pd.DataFrame(debug_rows))
 
     return lead_plan.astype(int)
+
 
 # --- Main App UI ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
