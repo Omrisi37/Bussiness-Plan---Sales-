@@ -98,8 +98,7 @@ def get_user_scenarios(user_id):
     if not db or not user_id: return []
     try:
         docs = db.collection('users').document(user_id).collection('scenarios').stream()
-        # Return a list with an empty string for the default selection
-        return [""] + [doc.id for doc in docs]
+        return [""] + [doc.id for doc in docs] # Add empty option for default
     except: return [""]
 
 def load_scenario_data(user_id, scenario_name):
@@ -234,16 +233,15 @@ with st.sidebar:
             col_load, col_save = st.columns(2)
             with col_load:
                 if len(saved_scenarios) > 1:
-                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0)
+                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
                     if st.button("Load") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
                         if loaded_data:
-                            # Clear previous results before loading new state
-                            st.session_state.results = {}
+                            st.session_state.results = {} # Clear old results
                             # Update session state with all loaded keys
                             for key, value in loaded_data.items():
                                 st.session_state[key] = value
-                            st.rerun()
+                            st.rerun() # Rerun the script to apply loaded values to widgets
                 else:
                     st.caption("No scenarios found for this User ID.")
             
@@ -253,15 +251,14 @@ with st.sidebar:
                     # Gather all current inputs from session_state
                     all_inputs = {'user_id': st.session_state.user_id, 'products': st.session_state.products}
                     for key, value in st.session_state.items():
-                        # Save only widget values
-                        if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'selected_scenario', 'scenario_name']:
+                        # Save only widget values by filtering out internal keys
+                        if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
                              if not key.startswith('FormSubmitter'):
                                 all_inputs[key] = value
                     save_scenario(st.session_state.user_id, scenario_name_to_save, all_inputs)
 
     with st.expander("Manage Products"):
         for i, product_name in enumerate(st.session_state.get('products', ["Product A", "Product B"])):
-            # The value is now pulled from session_state
             st.session_state.products[i] = st.text_input(f"Product {i+1} Name", value=st.session_state.get(f"pname_{i}", product_name), key=f"pname_{i}")
         
         new_product_name = st.text_input("New Product Name", key="new_product_name_input")
@@ -275,7 +272,6 @@ with st.sidebar:
     with st.expander("Lead Generation Parameters (Global)"):
         lead_params = { 'success_rates': {}, 'time_aheads_in_quarters': {} }
         customer_types_for_leads = ['Medium', 'Large', 'Global']
-        # Default values for lead gen params
         sr_defaults = {'Medium': 50, 'Large': 40, 'Global': 30}
         ta_defaults = {'Medium': 3, 'Large': 4, 'Global': 6}
         for c_type in customer_types_for_leads:
