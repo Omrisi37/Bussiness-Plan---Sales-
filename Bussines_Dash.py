@@ -158,7 +158,7 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                     if target_quarter in lead_plan.index:
                         lead_plan.loc[target_quarter, c_type] += leads_to_contact
                 except:
-                    pass # Ignore leads that need to be contacted before the plan starts
+                    pass
     return lead_plan.astype(int)
 
 # --- Main App UI ---
@@ -233,6 +233,7 @@ if run_button:
         # New logic flow for leads
         final_cumulative = res["cumulative_customers"].round().astype(int)
         acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
+        
         res['acquired_customers_plan'] = acquired_customers
         res['cumulative_customers'] = final_cumulative # Overwrite with rounded version
         res['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
@@ -247,10 +248,16 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # Extract dataframes from results
+            # Extract and format dataframes for display
             lead_plan_display = results[product_name]["lead_plan"].T
+            lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
+
             acquired_customers_display = results[product_name]["acquired_customers_plan"].T
+            acquired_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display.columns]
+            
             cum_cust_display = results[product_name]["cumulative_customers"].T
+            cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
+
             validation_df = pd.DataFrame({
                 'Target Revenue': results[product_name]['annual_revenue_targets'],
                 'Actual Revenue': results[product_name]['annual_revenue']
@@ -258,10 +265,6 @@ if st.session_state.results:
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
             
-            # Format columns for all transposed quarterly tables
-            for df in [lead_plan_display, acquired_customers_display, cum_cust_display]:
-                df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
-
             # Display all tables
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
@@ -329,9 +332,10 @@ if st.session_state.results:
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
     
+    summary_customers_for_excel = summary_customers_total_q.round().astype(int).to_frame(name="Total Customers")
     summary_for_excel = {
         "summary_revenue": summary_revenue_df,
-        "summary_customers": summary_customers_display
+        "summary_customers": summary_customers_for_excel
     }
     
     excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
