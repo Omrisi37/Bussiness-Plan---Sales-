@@ -86,8 +86,28 @@ def save_scenario(user_id, scenario_name, data):
         st.sidebar.warning("User ID and Scenario Name are required to save.")
         return
     try:
-        # Filter out internal Streamlit keys before saving
-        data_to_save = {k: v for k, v in data.items() if isinstance(k, str) and not k.startswith(('FormSubmitter', 'results', '_'))}
+        # Whitelist of keys to save - THIS IS THE FIX
+        data_to_save = {'user_id': user_id, 'products': st.session_state.products}
+        
+        # Gather global params
+        global_params = ['sr_Medium', 'ta_Medium', 'sr_Large', 'ta_Large', 'sr_Global', 'ta_Global']
+        for param in global_params:
+            if param in data: data_to_save[param] = data[param]
+
+        # Gather product-specific params
+        product_params = [
+            'is_m', 'is_l', 'is_g', 'mgr', 'pen_y1', 'tt_m', 'tt_l', 'tt_g',
+            'f_m', 'f_l', 'f_g', 'ip_kg', 'pdr', 'price_floor']
+        for i in range(1, 7): product_params.append(f'rev_y{i}')
+
+        for i, product in enumerate(data.get('products', [])):
+            pname_key = f'pname_{i}'
+            if pname_key in data: data_to_save[pname_key] = data[pname_key]
+            
+            for param in product_params:
+                key = f'{param}_{product}'
+                if key in data: data_to_save[key] = data[key]
+        
         doc_ref = db.collection('users').document(user_id).collection('scenarios').document(scenario_name)
         doc_ref.set(data_to_save)
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
@@ -98,7 +118,7 @@ def get_user_scenarios(user_id):
     if not db or not user_id: return []
     try:
         docs = db.collection('users').document(user_id).collection('scenarios').stream()
-        return [""] + [doc.id for doc in docs] # Add empty option for default
+        return [""] + [doc.id for doc in docs]
     except: return [""]
 
 def load_scenario_data(user_id, scenario_name):
@@ -223,7 +243,6 @@ st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
 with st.sidebar:
     st.title("Business Plan Controls")
 
-    # --- New User and Scenario Management Section ---
     with st.expander("User & Scenarios", expanded=True):
         user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
         
@@ -233,29 +252,40 @@ with st.sidebar:
             col_load, col_save = st.columns(2)
             with col_load:
                 if len(saved_scenarios) > 1:
-                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
+                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, key="load_scenario_select")
                     if st.button("Load") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
                         if loaded_data:
-                            st.session_state.results = {} # Clear old results
-                            # Update session state with all loaded keys
+                            st.session_state.results = {}
                             for key, value in loaded_data.items():
                                 st.session_state[key] = value
-                            st.rerun() # Rerun the script to apply loaded values to widgets
+                            st.rerun()
                 else:
-                    st.caption("No scenarios found for this User ID.")
+                    st.caption("No scenarios found.")
             
             with col_save:
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
                 if st.button("Save Current") and scenario_name_to_save:
-                    # Gather all current inputs from session_state
-                    all_inputs = {'user_id': st.session_state.user_id, 'products': st.session_state.products}
-                    for key, value in st.session_state.items():
-                        # Save only widget values by filtering out internal keys
-                        if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
-                             if not key.startswith('FormSubmitter'):
-                                all_inputs[key] = value
-                    save_scenario(st.session_state.user_id, scenario_name_to_save, all_inputs)
+                    # Collect all inputs from session state using a whitelist
+                    data_to_save = {'user_id': user_id, 'products': st.session_state.products}
+                    global_params = ['sr_Medium', 'ta_Medium', 'sr_Large', 'ta_Large', 'sr_Global', 'ta_Global']
+                    for param in global_params:
+                        if param in st.session_state: data_to_save[param] = st.session_state[param]
+                    
+                    product_params = [
+                        'is_m', 'is_l', 'is_g', 'mgr', 'pen_y1', 'tt_m', 'tt_l', 'tt_g',
+                        'f_m', 'f_l', 'f_g', 'ip_kg', 'pdr', 'price_floor']
+                    for i in range(1, 7): product_params.append(f'rev_y{i}')
+
+                    for i, product in enumerate(st.session_state.products):
+                        pname_key = f'pname_{i}'
+                        if pname_key in st.session_state: data_to_save[pname_key] = st.session_state[pname_key]
+                        
+                        for param in product_params:
+                            key = f'{param}_{product}'
+                            if key in st.session_state: data_to_save[key] = st.session_state[key]
+                    
+                    save_scenario(user_id, scenario_name_to_save, data_to_save)
 
     with st.expander("Manage Products"):
         for i, product_name in enumerate(st.session_state.get('products', ["Product A", "Product B"])):
@@ -277,8 +307,8 @@ with st.sidebar:
         for c_type in customer_types_for_leads:
             sr_key = f'sr_{c_type}'
             ta_key = f'ta_{c_type}'
-            lead_params['success_rates'][c_type] = st.slider(f'Success Rate (%) - {c_type}', 0, 100, value=st.session_state.get(sr_key, sr_defaults[c_type]), key=sr_key)
-            lead_params['time_aheads_in_quarters'][c_type] = st.slider(f'Time Ahead (Quarters) - {c_type}', 1, 12, value=st.session_state.get(ta_key, ta_defaults[c_type]), key=ta_key)
+            lead_params['success_rates'][c_type] = st.slider(f'Success Rate (%) - {c_type}', 0, 100, st.session_state.get(sr_key, sr_defaults[c_type]), key=sr_key)
+            lead_params['time_aheads_in_quarters'][c_type] = st.slider(f'Time Ahead (Quarters) - {c_type}', 1, 12, st.session_state.get(ta_key, ta_defaults[c_type]), key=ta_key)
     
     product_inputs = {}
     for product in st.session_state.products:
@@ -289,8 +319,8 @@ with st.sidebar:
             product_inputs[product]['is_l'] = st.number_input('Initial Tons/Customer - Large:', 0.0, value=st.session_state.get(f'is_l_{product}', 10.0), step=1.0, key=f'is_l_{product}')
             product_inputs[product]['is_g'] = st.number_input('Initial Tons/Customer - Global:', 0.0, value=st.session_state.get(f'is_g_{product}', 40.0), step=2.0, key=f'is_g_{product}')
         with st.expander(f"2. Customer Value Growth", expanded=False):
-            product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, value=st.session_state.get(f'mgr_{product}', 6.4), step=0.1, key=f'mgr_{product}')
-            product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, value=st.session_state.get(f'pen_y1_{product}', 7.5), step=0.1, key=f'pen_y1_{product}')
+            product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, st.session_state.get(f'mgr_{product}', 6.4), 0.1, key=f'mgr_{product}')
+            product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, st.session_state.get(f'pen_y1_{product}', 7.5), 0.1, key=f'pen_y1_{product}')
             product_inputs[product]['tt_m'] = st.number_input('Target Tons/Cust Year 5 - Medium:', 0.0, value=st.session_state.get(f'tt_m_{product}', 89.0), key=f'tt_m_{product}')
             product_inputs[product]['tt_l'] = st.number_input('Target Tons/Cust Year 5 - Large:', 0.0, value=st.session_state.get(f'tt_l_{product}', 223.0), key=f'tt_l_{product}')
             product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=st.session_state.get(f'tt_g_{product}', 536.0), key=f'tt_g_{product}')
@@ -301,17 +331,17 @@ with st.sidebar:
             for i in range(6):
                 year_num = i + 1
                 key = f'rev_y{year_num}_{product}'
-                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, value=st.session_state.get(key, default_revenues[i]), step=100000, format="$%d", key=key)
+                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, st.session_state.get(key, default_revenues[i]), 100000, format="$%d", key=key)
                 rev_targets.append(rev_slider_val)
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
             st.markdown("**Sales Focus (%)**")
-            product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, value=st.session_state.get(f'f_m_{product}', 50), step=5, key=f'f_m_{product}')
-            product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, value=st.session_state.get(f'f_l_{product}', 30), step=5, key=f'f_l_{product}')
-            product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, value=st.session_state.get(f'f_g_{product}', 20), step=5, key=f'f_g_{product}')
+            product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, st.session_state.get(f'f_m_{product}', 50), 5, key=f'f_m_{product}')
+            product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, st.session_state.get(f'f_l_{product}', 30), 5, key=f'f_l_{product}')
+            product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, st.session_state.get(f'f_g_{product}', 20), 5, key=f'f_g_{product}')
         with st.expander(f"4. Pricing Assumptions", expanded=False):
             product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=st.session_state.get(f'ip_kg_{product}', 18.0), step=0.5, key=f'ip_kg_{product}')
-            product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, value=st.session_state.get(f'pdr_{product}', 3.65), step=0.05, key=f'pdr_{product}')
+            product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, st.session_state.get(f'pdr_{product}', 3.65), 0.05, key=f'pdr_{product}')
             product_inputs[product]['price_floor'] = st.number_input('Minimum Price ($):', 0.0, value=st.session_state.get(f'price_floor_{product}', 14.0), step=0.5, key=f'price_floor_{product}')
     
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
