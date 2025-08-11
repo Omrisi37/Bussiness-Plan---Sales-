@@ -29,13 +29,22 @@ with st.sidebar.expander("2. Customer Value Growth", expanded=True):
     tt_l = st.number_input('Target Tons/Cust Year 5 - Large:', min_value=0.0, value=223.0)
     tt_g = st.number_input('Target Tons/Cust Year 5 - Global:', min_value=0.0, value=536.0)
 
-# --- 3. יעדי הכנסות ואסטרטגיית גיוס ---
+# --- 3. יעדי הכנסות ואסטרטגיית גיוס (עם סליידרים) ---
 with st.sidebar.expander("3. Revenue Targets & Sales Strategy", expanded=True):
-    revenue_targets_str = st.text_input('Target Annual Revenue ($) - Comma separated for 6 years:', value='400000, 1200000, 2500000, 4000000, 6000000, 8000000')
+    st.markdown("**Target Annual Revenue ($)**")
+    # יצירת הסליידרים ליעדי ההכנסות
+    rev_y1 = st.slider('Year 1:', min_value=0, max_value=10_000_000, value=400000, step=50000, format="$%d")
+    rev_y2 = st.slider('Year 2:', min_value=0, max_value=20_000_000, value=1200000, step=50000, format="$%d")
+    rev_y3 = st.slider('Year 3:', min_value=0, max_value=30_000_000, value=2500000, step=50000, format="$%d")
+    rev_y4 = st.slider('Year 4:', min_value=0, max_value=50_000_000, value=4000000, step=50000, format="$%d")
+    rev_y5 = st.slider('Year 5:', min_value=0, max_value=50_000_000, value=6000000, step=50000, format="$%d")
+    rev_y6 = st.slider('Year 6:', min_value=0, max_value=100_000_000, value=8000000, step=50000, format="$%d")
+    
     st.markdown("---")
-    f_m = st.slider('Sales Focus - Medium (%):', 0, 100, 60, 5)
-    f_l = st.slider('Sales Focus - Large (%):', 0, 100, 30, 5)
-    f_g = st.slider('Sales Focus - Global (%):', 0, 100, 10, 5)
+    st.markdown("**Sales Focus (%)**")
+    f_m = st.slider('Medium:', 0, 100, 60, 5, key='focus_m')
+    f_l = st.slider('Large:', 0, 100, 30, 5, key='focus_l')
+    f_g = st.slider('Global:', 0, 100, 10, 5, key='focus_g')
 
 # --- 4. הגדרות תמחור ---
 with st.sidebar.expander("4. Pricing Assumptions", expanded=True):
@@ -49,7 +58,7 @@ run_button = st.sidebar.button("Run Analysis", use_container_width=True)
 # --- פונקציית החישוב המרכזית ---
 # הפונקציה נשארת כמעט זהה, רק לוקחת את המשתנים שהגדרנו למעלה
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
-                   revenue_targets_str, f_m, f_l, f_g, ip_kg, pdr):
+                   annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr):
     
     START_YEAR = 2025
     NUM_YEARS = 6
@@ -57,7 +66,7 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     quarters_index = pd.date_range(start=f'{START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
     customer_types = ['Medium', 'Large', 'Global']
 
-    # --- חלק 1: חישוב מנועי הערך ---
+    # ... (כל קוד החישוב נשאר זהה לחלוטין לקוד הקודם)
     tons_per_customer = pd.DataFrame(index=years, columns=customer_types, dtype=float)
     tons_per_customer.loc[START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
@@ -81,15 +90,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     prices = [ip_kg * ((1 - pdr/100) ** i) for i in range(len(quarters_index))]
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
-
-    # --- חלק 2: המנוע ההפוך - חישוב תוכנית הגיוס ---
-    try:
-        annual_rev_targets = [float(p.strip()) for p in revenue_targets_str.split(',')]
-        if len(annual_rev_targets) != NUM_YEARS: raise ValueError
-    except:
-        st.error(f"Error in Revenue Targets format. Please enter {NUM_YEARS} comma-separated numbers.")
-        st.stop()
-        
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
     if total_focus == 0:
@@ -112,7 +112,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
         
-    # --- הכנת הנתונים להצגה ---
     new_customers_plan_rounded = new_customers_plan.round(2)
     customers_df_quarterly_final = cumulative_customers.round().astype(int)
     customers_df_annual = customers_df_quarterly_final.resample('YE').last()
@@ -132,10 +131,13 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
 st.title("📈 Top-Down Business Plan Dashboard")
 
 if run_button:
+    # איסוף יעדי ההכנסות מהסליידרים החדשים
+    annual_rev_targets = [rev_y1, rev_y2, rev_y3, rev_y4, rev_y5, rev_y6]
+    
     # קריאה לפונקציית החישוב עם כל הפרמטרים מה-sidebar
     new_customers_plan, customers_df_annual, validation_df, tons_per_customer, pen_rate_df = calculate_plan(
         is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
-        revenue_targets_str, f_m, f_l, f_g, ip_kg, pdr
+        annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr
     )
     
     # --- הצגת התוצאות באזור המרכזי ---
