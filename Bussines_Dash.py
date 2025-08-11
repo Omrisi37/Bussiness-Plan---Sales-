@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import PchipInterpolator
 import io
+from google.oauth2 import service_account
+from google.cloud import firestore
 
 # --- Page Config & Chart Styling ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
