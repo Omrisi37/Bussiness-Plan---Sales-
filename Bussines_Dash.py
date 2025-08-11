@@ -67,7 +67,7 @@ def to_excel(results_dict):
 
 # --- פונקציות החישוב המרכזיות ---
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
-                   annual_rev_targets, f_m, f_l, f_g, ip_kg):
+                   annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
     """Main calculation engine for a single product."""
     START_YEAR = 2025
     NUM_YEARS = 6
@@ -75,7 +75,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     quarters_index = pd.date_range(start=f'{START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
     customer_types = ['Medium', 'Large', 'Global']
     
-    # Part 1: Calculate value drivers
     tons_per_customer = pd.DataFrame(index=years, columns=customer_types, dtype=float)
     tons_per_customer.loc[START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
@@ -96,11 +95,10 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
             pen_growth_factor = pen_rate_df.loc[year_idx + 1, c_type] / pen_rate_df.loc[year_idx, c_type]
             tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
             
-    # New Pricing Logic
+    # New Dynamic Pricing Logic
     prices = []
     current_price = ip_kg
-    decay_rate = 0.0365  # ~3.65% to get from 18 to 15.5 in 4 quarters
-    price_floor = 14.0
+    decay_rate = pdr / 100.0
     for _ in range(len(quarters_index)):
         prices.append(current_price)
         next_price = current_price * (1 - decay_rate)
@@ -109,7 +107,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
     
-    # Part 2: Top-down engine to generate acquisition plan
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
     if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
@@ -221,6 +218,8 @@ with st.sidebar:
             product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, 20, 5, key=f'f_g_{product}')
         with st.expander(f"4. Pricing Assumptions", expanded=False):
             product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=18.0, step=0.5, key=f'ip_kg_{product}')
+            product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, 3.65, 0.05, key=f'pdr_{product}')
+            product_inputs[product]['price_floor'] = st.number_input('Minimum Price ($):', 0.0, value=14.0, step=0.5, key=f'price_floor_{product}')
     
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
 
@@ -243,7 +242,6 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # Extract and format all dataframes for display
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
 
