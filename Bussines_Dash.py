@@ -139,7 +139,11 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     }
 
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
-    """Calculates leads based on a plan of acquired (integer) customers."""
+    """
+    Calculates leads needed, given acquired customers per quarter,
+    desired success rates, and quarters-ahead for each customer type.
+    Puts the required leads in the right previous quarter for each acquisition.
+    """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
     
@@ -147,18 +151,20 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
         for c_type in acquired_customers_plan.columns:
             new_cust_count = row[c_type]
             if new_cust_count > 0:
-                success_rate = success_rates[c_type] / 100
+                success_rate = success_rates[c_type] / 100.0
                 time_ahead_q = time_aheads_in_quarters[c_type]
+                
+                # מספר הלידים הדרוש
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
                 
-                contact_date = q_date - pd.DateOffset(months=time_ahead_q * 3)
+                # חשב את רבעון המקור (time_ahead_r כמות רבעונים אחורה)
+                contact_quarter_period = q_date.to_period('Q') - time_ahead_q
+                # ממיר לרבעון (סוף רבעון, תואם אינדקס)
+                contact_quarter = contact_quarter_period.to_timestamp(how='end')
                 
-                try:
-                    target_quarter = pd.Timestamp(contact_date).to_period('Q').to_timestamp(how='end', freq='Q')
-                    if target_quarter in lead_plan.index:
-                        lead_plan.loc[target_quarter, c_type] += leads_to_contact
-                except:
-                    pass
+                # עדכן את הליד ברבעון הנכון
+                if contact_quarter in lead_plan.index:
+                    lead_plan.loc[contact_quarter, c_type] += int(leads_to_contact)
     return lead_plan.astype(int)
 
 # --- Main App UI ---
