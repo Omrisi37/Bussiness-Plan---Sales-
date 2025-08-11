@@ -8,17 +8,17 @@ import seaborn as sns
 from scipy.interpolate import PchipInterpolator
 import io
 
-# --- הגדרת העיצוב לדף ולגרפים ---
+# --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="whitegrid")
 
-# --- אתחול Session State ---
+# --- Session State Initialization ---
 if 'products' not in st.session_state:
     st.session_state.products = ["Product A", "Product B"]
 if 'results' not in st.session_state:
     st.session_state.results = {}
 
-# --- פונקציות עזר ---
+# --- Helper Functions ---
 @st.cache_data
 def to_excel(results_dict):
     """Creates an Excel file from the results dictionary."""
@@ -231,7 +231,7 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # Extract and format all dataframes for display
+            # --- Display logic with formatting fix ---
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
 
@@ -278,12 +278,12 @@ if st.session_state.results:
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
         summary_customers_list = [results[p]['cumulative_customers'] for p in st.session_state.products]
-        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1).round().astype(int)
+        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1) # Keep as float for Excel
         
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
 
-        summary_customers_display = summary_customers_total_q.to_frame(name="Total Customers").T
+        summary_customers_display = summary_customers_total_q.round().astype(int).to_frame(name="Total Customers").T
         summary_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display.columns]
         st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
         st.dataframe(summary_customers_display.style.format("{:,d}"))
@@ -308,10 +308,14 @@ if st.session_state.results:
         st.pyplot(fig_sum)
     
     # Prepare data for download button
-    excel_results_to_pass = results.copy()
+    excel_results_to_pass = {}
+    for prod_name, res_data in results.items():
+        excel_results_to_pass[prod_name] = res_data.copy()
+        excel_results_to_pass[prod_name]['lead_plan'] = create_lead_plan(res_data["new_customers_plan"], **lead_params)
+    
     summary_for_excel = {
         "summary_revenue": summary_revenue_df,
-        "summary_customers": summary_customers_display
+        "summary_customers": summary_customers_total_q.round().astype(int).to_frame(name="Total Customers")
     }
     
     excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
