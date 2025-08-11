@@ -150,12 +150,9 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
     """
     Calculate required leads per quarter for acquired customers,
     ensuring perfect quarter alignment by comparing PeriodIndex (quarter level).
-    Includes debug output in Streamlit.
     """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
-
-    debug_rows = []
 
     for q_date, row in acquired_customers_plan.iterrows():
         for c_type in acquired_customers_plan.columns:
@@ -165,30 +162,14 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
 
-                # לחשב רבעון יעד ברמת Period
+                # Calculate the target quarter at the Period level
                 target_period = q_date.to_period('Q') - time_ahead_q
 
-                # לבדוק אם קיים ברמת Period בלבד
+                # Find the corresponding timestamp in the index by comparing Periods
                 idx_matches = lead_plan.index[lead_plan.index.to_period('Q') == target_period]
 
                 if len(idx_matches) > 0:
                     lead_plan.loc[idx_matches[0], c_type] += int(leads_to_contact)
-                    in_index = True
-                else:
-                    in_index = False
-
-                debug_rows.append({
-                    "Acquire Quarter": q_date,
-                    "Customer Type": c_type,
-                    "New Customers": int(new_cust_count),
-                    "Leads Calculated": int(leads_to_contact),
-                    "Target Quarter (Period)": target_period,
-                    "Target in Index?": in_index
-                })
-
-    # הצגת טבלת הדיבאג
-    st.subheader("🔍 Lead Plan Debug Info (Quarter Matching)")
-    st.dataframe(pd.DataFrame(debug_rows))
 
     return lead_plan.astype(int)
 
