@@ -45,7 +45,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     prices = [ip_kg * ((1 - pdr/100) ** i) for i in range(len(quarters_index))]
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
-
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
     if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
@@ -70,11 +69,18 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * customers_df_quarterly_final).sum(axis=1)
     
+    # --- התיקון המרכזי ---
+    # ודא שגם ההכנסה בפועל וגם ההכנסה המתוכננת משתמשות באינדקס מספרי של שנים
+    annual_revenue_series = actual_revenue_q.resample('YE').sum()
+    annual_revenue_series.index = years
+
+    annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
+    
     return {
         "new_customers_plan": new_customers_plan,
         "cumulative_customers": customers_df_quarterly_final,
-        "annual_revenue": actual_revenue_q.resample('YE').sum(),
-        "annual_revenue_targets": pd.Series(annual_rev_targets, index=years),
+        "annual_revenue": annual_revenue_series,
+        "annual_revenue_targets": annual_revenue_targets_series,
         "tons_per_customer": tons_per_customer,
         "pen_rate_df": pen_rate_df,
         "error": None
@@ -108,14 +114,13 @@ products = ["Product 1", "Product 2"]
 product_inputs = {}
 
 with st.sidebar:
+    # ... (כל הגדרות הסיידבר נשארו זהות לחלוטין)
     st.title("Business Plan Controls")
-    
     with st.expander("5. Lead Generation Parameters (Global)"):
         lead_params = { 'success_rates': {}, 'time_aheads': {} }
         for c_type in ['Medium', 'Large', 'Global']:
             lead_params['success_rates'][c_type] = st.slider(f'Success Rate (%) - {c_type}', 0, 100, 50, key=f'sr_{c_type}')
             lead_params['time_aheads'][c_type] = st.slider(f'Time Ahead (Months) - {c_type}', 0, 24, 8, key=f'ta_{c_type}')
-
     for product in products:
         st.header(product)
         product_inputs[product] = {}
@@ -123,7 +128,6 @@ with st.sidebar:
             product_inputs[product]['is_m'] = st.number_input('Initial Tons/Customer - Medium:', 0.0, value=1.5, step=0.1, key=f'is_m_{product}')
             product_inputs[product]['is_l'] = st.number_input('Initial Tons/Customer - Large:', 0.0, value=10.0, step=1.0, key=f'is_l_{product}')
             product_inputs[product]['is_g'] = st.number_input('Initial Tons/Customer - Global:', 0.0, value=40.0, step=2.0, key=f'is_g_{product}')
-        
         with st.expander(f"2. Customer Value Growth", expanded=False):
             product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, 6.4, 0.1, key=f'mgr_{product}')
             product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, 7.5, 0.1, key=f'pen_y1_{product}')
@@ -131,7 +135,6 @@ with st.sidebar:
             product_inputs[product]['tt_m'] = st.number_input('Target Tons/Cust Year 5 - Medium:', 0.0, value=89.0, key=f'tt_m_{product}')
             product_inputs[product]['tt_l'] = st.number_input('Target Tons/Cust Year 5 - Large:', 0.0, value=223.0, key=f'tt_l_{product}')
             product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=536.0, key=f'tt_g_{product}')
-
         with st.expander(f"3. Revenue Targets & Sales Strategy", expanded=False):
             st.markdown("**Target Annual Revenue ($)**")
             default_revenues = [400000, 1200000, 2500000, 4000000, 6000000, 8000000]
@@ -146,16 +149,14 @@ with st.sidebar:
             product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, 60, 5, key=f'f_m_{product}')
             product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, 30, 5, key=f'f_l_{product}')
             product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, 10, 5, key=f'f_g_{product}')
-            
         with st.expander(f"4. Pricing Assumptions", expanded=False):
             product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=15.0, step=0.5, key=f'ip_kg_{product}')
             product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 15.0, 2.5, 0.1, key=f'pdr_{product}')
-    
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
 
 # --- הרצה וסיכום ---
 if run_button:
-    # ... (כל קוד ההרצה וההצגה נשאר זהה לחלוטין)
+    # ... (כל קוד ההרצה והצגת התוצאות נשאר זהה לחלוטין)
     results = {}
     has_error = False
     for product in products:
@@ -178,6 +179,7 @@ if run_button:
                 st.subheader("Action Plan & Outcomes")
                 new_customers_plan = results[product]["new_customers_plan"]
                 customers_df_annual = results[product]["cumulative_customers"].resample('YE').last()
+                # שימוש באינדקס המספרי הנכון
                 customers_df_annual.index = results[product]["annual_revenue_targets"].index
                 validation_df = pd.DataFrame({'Target Revenue': results[product]['annual_revenue_targets'],'Actual Revenue': results[product]['annual_revenue']})
                 validation_df['Difference'] = validation_df['Actual Revenue'] - validation_df['Target Revenue']
@@ -196,13 +198,17 @@ if run_button:
                 st.pyplot(fig)
         with tab_summary:
             st.header("Overall Summary (All Products)")
-            summary_revenue = sum(results[p]['annual_revenue'] for p in products)
-            summary_customers = sum(results[p]['cumulative_customers'].resample('YE').last() for p in products)
-            summary_customers.index = summary_revenue.index
+            summary_revenue_list = [results[p]['annual_revenue'] for p in products]
+            summary_revenue = pd.concat(summary_revenue_list, axis=1).sum(axis=1)
+            summary_customers_list = [results[p]['cumulative_customers'].resample('YE').last() for p in products]
+            # Ensure all customer DFs have the same integer index before summing
+            for i, df in enumerate(summary_customers_list):
+                df.index = summary_revenue.index
+            summary_customers = pd.concat(summary_customers_list, axis=1).sum(axis=1)
             st.markdown("#### Summary: Total Revenue per Year")
             st.dataframe(summary_revenue.to_frame(name="Total Revenue").style.format("${:,.0f}"))
             st.markdown("#### Summary: Total Cumulative Customers per Year")
-            st.dataframe(summary_customers.T.style.format("{:,d}"))
+            st.dataframe(summary_customers.to_frame(name="Total Customers").T.style.format("{:,d}"))
             st.markdown("#### Chart: Total Revenue Breakdown by Product")
             all_revenues = {p: results[p]['annual_revenue'] for p in products}
             summary_plot_df = pd.DataFrame(all_revenues)
@@ -213,6 +219,5 @@ if run_button:
             ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x:,.0f}"))
             ax_sum.set_xticklabels(summary_plot_df.index.to_series().astype(str), rotation=45)
             st.pyplot(fig_sum)
-
 else:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
