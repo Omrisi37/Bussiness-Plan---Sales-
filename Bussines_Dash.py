@@ -65,7 +65,6 @@ def to_excel(results_dict):
 
     return output.getvalue()
 
-# --- פונקציות החישוב המרכזיות ---
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
     """Main calculation engine for a single product."""
@@ -95,7 +94,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
             pen_growth_factor = pen_rate_df.loc[year_idx + 1, c_type] / pen_rate_df.loc[year_idx, c_type]
             tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
             
-    # New Dynamic Pricing Logic
     prices = []
     current_price = ip_kg
     decay_rate = pdr / 100.0
@@ -143,9 +141,10 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "pen_rate_df": pen_rate_df,
         "error": None
     }
+
 def create_lead_plan(new_customers_plan, success_rates, time_aheads):
-    """Calculates the required leads to contact based on the acquisition plan."""
-    lead_plan = pd.DataFrame(0.0, index=new_customers_plan.index, columns=new_customers_plan.columns)
+    """Calculates the required leads to contact. Rewritten for robustness."""
+    leads_to_generate = []
     for q_date, row in new_customers_plan.iterrows():
         for c_type in new_customers_plan.columns:
             new_cust_count = row[c_type]
@@ -154,13 +153,29 @@ def create_lead_plan(new_customers_plan, success_rates, time_aheads):
                 time_ahead = time_aheads[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
                 contact_date = q_date - pd.DateOffset(months=time_ahead)
-                try:
-                    target_quarter = pd.Timestamp(contact_date).to_period('Q').to_timestamp(how='end', freq='Q')
-                    if target_quarter in lead_plan.index:
-                        lead_plan.loc[target_quarter, c_type] += leads_to_contact
-                except:
-                    pass
-    return lead_plan.astype(int)
+                leads_to_generate.append([contact_date, c_type, leads_to_contact])
+    
+    if not leads_to_generate:
+        return pd.DataFrame(0, index=new_customers_plan.index, columns=new_customers_plan.columns).astype(int)
+
+    leads_df = pd.DataFrame(leads_to_generate, columns=['ContactDate', 'CustomerType', 'Leads'])
+    leads_df['ContactQuarter'] = leads_df['ContactDate'].dt.to_period('Q').dt.to_timestamp(how='end', freq='Q')
+    
+    leads_df = leads_df[leads_df['ContactQuarter'].isin(new_customers_plan.index)]
+    
+    if leads_df.empty:
+         return pd.DataFrame(0, index=new_customers_plan.index, columns=new_customers_plan.columns).astype(int)
+
+    lead_plan_pivot = leads_df.pivot_table(
+        index='ContactQuarter', 
+        columns='CustomerType', 
+        values='Leads', 
+        aggfunc='sum'
+    ).fillna(0)
+    
+    final_lead_plan = lead_plan_pivot.reindex(new_customers_plan.index, fill_value=0)
+    
+    return final_lead_plan[new_customers_plan.columns].astype(int)
 
 # --- Main App UI ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
@@ -242,6 +257,7 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
+            # Extract and format dataframes for display
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
 
@@ -282,6 +298,8 @@ if st.session_state.results:
             fig, ax = plt.subplots(figsize=(12, 6))
             sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette=['lightgray', 'skyblue'])
             ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=16)
+            for p in ax.patches:
+                ax.annotate(f'${p.get_height():,.0f}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 9), textcoords='offset points', fontsize=9)
             st.pyplot(fig)
             
             with st.expander("View Underlying Assumptions"):
@@ -297,12 +315,12 @@ if st.session_state.results:
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
         summary_customers_list = [results[p]['cumulative_customers'] for p in st.session_state.products]
-        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1).round().astype(int)
+        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1)
         
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
 
-        summary_customers_display = summary_customers_total_q.to_frame(name="Total Customers").T
+        summary_customers_display = summary_customers_total_q.round().astype(int).to_frame(name="Total Customers").T
         summary_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display.columns]
         st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
         st.dataframe(summary_customers_display.style.format("{:,d}"))
@@ -330,11 +348,10 @@ if st.session_state.results:
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
-        excel_results_to_pass[prod_name]['lead_plan'] = create_lead_plan(res_data["new_customers_plan"], **lead_params)
     
     summary_for_excel = {
         "summary_revenue": summary_revenue_df,
-        "summary_customers": summary_customers_total_q.to_frame(name="Total Customers")
+        "summary_customers": summary_customers_total_q.round().astype(int).to_frame(name="Total Customers")
     }
     
     excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
