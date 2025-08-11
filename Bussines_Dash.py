@@ -151,7 +151,6 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
                 
-                # Use quarterly offset
                 contact_date = q_date - pd.DateOffset(months=time_ahead_q * 3)
                 
                 try:
@@ -159,7 +158,7 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
                     if target_quarter in lead_plan.index:
                         lead_plan.loc[target_quarter, c_type] += leads_to_contact
                 except:
-                    pass
+                    pass # Ignore leads that need to be contacted before the plan starts
     return lead_plan.astype(int)
 
 # --- Main App UI ---
@@ -230,6 +229,13 @@ if run_button:
         res = calculate_plan(**product_inputs[product])
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
+        
+        # New logic flow for leads
+        final_cumulative = res["cumulative_customers"].round().astype(int)
+        acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
+        res['acquired_customers_plan'] = acquired_customers
+        res['cumulative_customers'] = final_cumulative # Overwrite with rounded version
+        res['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
         results_data[product] = res
     st.session_state.results = results_data
 
@@ -241,33 +247,21 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # --- New Logic Flow ---
-            # 1. Get the final cumulative customers and round them
-            final_cumulative_customers = results[product_name]["cumulative_customers"].round().astype(int)
-
-            # 2. Calculate the difference to find acquired customers
-            acquired_customers_plan = final_cumulative_customers.diff(axis=0).fillna(final_cumulative_customers.iloc[0]).clip(lower=0).astype(int)
-
-            # 3. Create the lead plan based on the acquired customers
-            lead_plan = create_lead_plan(acquired_customers_plan, **lead_params)
-
-            # 4. Prepare tables for display
-            lead_plan_display = lead_plan.T
-            lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
-
-            acquired_customers_display = acquired_customers_plan.T
-            acquired_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display.columns]
-            
-            cum_cust_display = final_cumulative_customers.T
-            cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
-
+            # Extract dataframes from results
+            lead_plan_display = results[product_name]["lead_plan"].T
+            acquired_customers_display = results[product_name]["acquired_customers_plan"].T
+            cum_cust_display = results[product_name]["cumulative_customers"].T
             validation_df = pd.DataFrame({
                 'Target Revenue': results[product_name]['annual_revenue_targets'],
                 'Actual Revenue': results[product_name]['annual_revenue']
             })
             validation_df.index.name = "Year"
-            results[product_name]['validation_df'] = validation_df # Save for excel export
+            results[product_name]['validation_df'] = validation_df
             
+            # Format columns for all transposed quarterly tables
+            for df in [lead_plan_display, acquired_customers_display, cum_cust_display]:
+                df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
+
             # Display all tables
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
@@ -293,7 +287,7 @@ if st.session_state.results:
             for p in ax.patches:
                 ax.annotate(f'${p.get_height():,.0f}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 9), textcoords='offset points', fontsize=9)
             st.pyplot(fig)
-            
+
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
@@ -301,7 +295,7 @@ if st.session_state.results:
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
         summary_customers_list = [results[p]['cumulative_customers'] for p in st.session_state.products]
-        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1).round().astype(int)
+        summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1)
         
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
@@ -333,16 +327,8 @@ if st.session_state.results:
     # Prepare data for download button
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
-        # Recalculate derived tables for export
-        final_cumulative = res_data["cumulative_customers"].round().astype(int)
-        acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
-        
         excel_results_to_pass[prod_name] = res_data.copy()
-        excel_results_to_pass[prod_name]['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
-        excel_results_to_pass[prod_name]['acquired_customers_plan'] = acquired_customers
-        excel_results_to_pass[prod_name]['cumulative_customers'] = final_cumulative
-        excel_results_to_pass[prod_name]['validation_df'] = pd.DataFrame({'Target Revenue': res_data['annual_revenue_targets'],'Actual Revenue': res_data['annual_revenue']})
-
+    
     summary_for_excel = {
         "summary_revenue": summary_revenue_df,
         "summary_customers": summary_customers_display
