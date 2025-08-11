@@ -8,6 +8,28 @@ import io
 from google.oauth2 import service_account
 from google.cloud import firestore
 
+import base64
+import pandas as pd
+
+def clean_value_for_session_state(value):
+    if isinstance(value, (str, int, float, bool, type(None), list, dict)):
+        return value
+    elif isinstance(value, pd.DataFrame):
+        # המרה למילון עם orient='split' לשחזור נוח
+        return value.to_dict(orient='split')
+    elif isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    elif isinstance(value, bytes):
+        # המרה למחרוזת base64
+        return base64.b64encode(value).decode('utf-8')
+    else:
+        return str(value)
+
+def safe_set_session_state_from_loaded_data(loaded_data):
+    for key, value in loaded_data.items():
+        cleaned_value = clean_value_for_session_state(value)
+        st.session_state[key] = cleaned_value
+
 # === פונקציות עזר לטעינה בטוחה ל-session_state === #
 def is_json_serializable(value):
     """בודק אם הערך הוא מסוג שמותר ב-session_state ישירות."""
