@@ -136,6 +136,8 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "cumulative_customers": customers_df_quarterly_final,
         "annual_revenue": annual_revenue_series,
         "annual_revenue_targets": annual_revenue_targets_series,
+        "tons_per_customer": tons_per_customer, # <-- שורה חדשה
+        "pen_rate_df": pen_rate_df,             # <-- שורה חדשה
         "error": None
     }
 
@@ -293,7 +295,19 @@ if st.session_state.results:
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
             ax.set_xlabel("Year", fontsize=12)
             ax.set_ylabel("Revenue", fontsize=12)
-
+            # הוספת הטבלאות החסרות
+            with st.expander("View Underlying Assumptions"):
+                # שליפת הדאטה פריימים מהתוצאות
+                tons_per_customer_df = results[product_name].get('tons_per_customer')
+                pen_rate_df = results[product_name].get('pen_rate_df')
+                
+                if tons_per_customer_df is not None:
+                    st.markdown("#### Table 4: Annual Tons per Single Customer (Target-Driven)")
+                    st.dataframe(tons_per_customer_df.T.style.format("{:,.2f}"))
+                
+                if pen_rate_df is not None:
+                    st.markdown("#### Table 5: Generated Penetration Rates to Meet Target (%)")
+                    st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
             for container in barplot.containers:
                 ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
             st.pyplot(fig)
