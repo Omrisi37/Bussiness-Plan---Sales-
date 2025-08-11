@@ -10,8 +10,7 @@ import io
 
 # --- Page Config & Chart Styling ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
-# שינוי 1: עיצוב כללי חדש לכל הגרפים - רקע כהה ופונטים מוגדלים
-sns.set_theme(style="darkgrid", font_scale=1.1)
+sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 
 
 # --- Session State Initialization ---
@@ -283,17 +282,18 @@ if st.session_state.results:
             plot_df = validation_df.reset_index()
             plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
             
-            # שינוי 2: גרף מוצר בודד
-            fig, ax = plt.subplots(figsize=(12, 6))
-            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="viridis")
-            ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=16)
+            fig, ax = plt.subplots(figsize=(14, 7))
+            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
+            
+            ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=18, weight='bold')
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
-            
-            # שינוי 3: לולאה חדשה להוספת תוויות מרווחות
+            ax.set_xlabel("Year", fontsize=12)
+            ax.set_ylabel("Revenue", fontsize=12)
+
             for container in barplot.containers:
-                ax.bar_label(container, fmt='$%.0f', padding=3, fontsize=9)
+                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=90)
             st.pyplot(fig)
-            
+
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
@@ -315,26 +315,30 @@ if st.session_state.results:
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
         all_revenues = {p: results[p]['annual_revenue'] for p in st.session_state.products}
         summary_plot_df = pd.DataFrame(all_revenues)
+        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
         
-        # שינוי 4: גרף סיכום כללי
-        fig_sum, ax_sum = plt.subplots(figsize=(14, 7))
-        summary_plot_df.plot(kind='bar', stacked=True, ax=ax_sum, colormap="plasma")
+        fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
         
-        for c in ax_sum.containers:
-            labels = [f'${v/1_000_000:.1f}M' if v > sum(summary_plot_df.sum())*0.02 else '' for v in c.datavalues]
-            ax_sum.bar_label(c, labels=labels, label_type='center', color='white', weight='bold', fontsize=9, padding=3)
-        totals = summary_plot_df.sum(axis=1)
-        for i, total in enumerate(totals):
-            if total > 0:
-                ax_sum.text(i, total, f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=10)
-        
-        ax_sum.set_title('Total Revenue by Product (Stacked)', fontsize=16)
-        ax_sum.set_ylabel('Revenue ($)'); ax_sum.set_xlabel('Year')
-        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
+        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
+
+        for container in ax_sum.containers:
+            ax_sum.bar_label(
+                container,
+                fmt='$ {:,.0f}',
+                rotation=90,
+                padding=8,
+                fontsize=10,
+                color='white',
+                fontweight='bold'
+            )
+
+        ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
+        ax_sum.set_ylabel('Revenue ($)', fontsize=12)
+        ax_sum.set_xlabel('Year', fontsize=12)
+        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
     
-    # Prepare data for download button
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
