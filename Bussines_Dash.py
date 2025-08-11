@@ -199,7 +199,7 @@ with st.sidebar:
             rev_targets = []
             for i in range(6):
                 year_num = i + 1
-                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, default_revenues[i], 50000, format="$%d", key=f'rev_y{year_num}_{product}')
+                rev_slider_val = st.slider(f'Year {year_num}:', 0, 20_000_000, default_revenues[i], 50000, format="$%d", key=f'rev_y{year_num}_{product}')
                 rev_targets.append(rev_slider_val)
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
