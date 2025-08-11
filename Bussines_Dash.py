@@ -56,12 +56,16 @@ def to_excel(results_dict):
         # Handle the summary sheet separately
         if "summary" in results_dict:
             summary_data = results_dict["summary"]
-            summary_data["summary_revenue"].to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
+            summary_revenue_df = summary_data["summary_revenue"]
+            summary_customers_df = summary_data["summary_customers"]
+            
+            summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
             writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
             
-            summary_customers_df = summary_data["summary_customers"]
-            summary_customers_df.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df.columns]
-            summary_customers_df.to_excel(writer, sheet_name="Overall Summary", startrow=10, index=True)
+            # Correctly format the summary customers table for Excel
+            summary_customers_df_T = summary_customers_df.T
+            summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
+            summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10, index=True)
             writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
 
     return output.getvalue()
@@ -227,7 +231,7 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # --- Display logic with formatting fix ---
+            # Extract and format all dataframes for display
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
 
@@ -271,13 +275,13 @@ if st.session_state.results:
         st.header("Overall Summary (All Products)")
         
         summary_revenue_list = [results[p]['annual_revenue'] for p in st.session_state.products]
-        summary_revenue = pd.concat(summary_revenue_list, axis=1).sum(axis=1)
+        summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
         summary_customers_list = [results[p]['cumulative_customers'] for p in st.session_state.products]
         summary_customers_total_q = pd.concat(summary_customers_list, axis=1).sum(axis=1).round().astype(int)
         
         st.markdown("#### Summary: Total Revenue per Year")
-        st.dataframe(summary_revenue.to_frame(name="Total Revenue").style.format("${:,.0f}"))
+        st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
 
         summary_customers_display = summary_customers_total_q.to_frame(name="Total Customers").T
         summary_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display.columns]
@@ -303,13 +307,10 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
     
-    excel_results_to_pass = {}
-    for prod_name, res_data in results.items():
-        excel_results_to_pass[prod_name] = res_data.copy()
-        excel_results_to_pass[prod_name]['lead_plan'] = create_lead_plan(res_data["new_customers_plan"], **lead_params)
-    
+    # Prepare data for download button
+    excel_results_to_pass = results.copy()
     summary_for_excel = {
-        "summary_revenue": summary_revenue.to_frame(name="Total Revenue"),
+        "summary_revenue": summary_revenue_df,
         "summary_customers": summary_customers_display
     }
     
