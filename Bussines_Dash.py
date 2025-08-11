@@ -136,8 +136,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "cumulative_customers": customers_df_quarterly_final,
         "annual_revenue": annual_revenue_series,
         "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_per_customer": tons_per_customer,
-        "pen_rate_df": pen_rate_df,
         "error": None
     }
 
@@ -266,9 +264,6 @@ if st.session_state.results:
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
             
-            tons_per_customer_df = results[product_name]['tons_per_customer']
-            pen_rate_df = results[product_name]['pen_rate_df']
-            
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
             st.dataframe(lead_plan_display.style.format("{:d}"))
@@ -296,15 +291,8 @@ if st.session_state.results:
             ax.set_ylabel("Revenue", fontsize=12)
 
             for container in barplot.containers:
-                ax.bar_label(container, fmt='$%.0f', padding=5, fontsize=9, rotation=45, color='black', ha='left')
+                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
             st.pyplot(fig)
-
-            # הוספת הטבלה החסרה
-            with st.expander("View Underlying Assumptions"):
-                st.markdown("#### Table 4: Annual Tons per Single Customer (Target-Driven)")
-                st.dataframe(tons_per_customer_df.T.style.format("{:,.2f}"))
-                st.markdown("#### Table 5: Generated Penetration Rates to Meet Target (%)")
-                st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
 
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
@@ -338,10 +326,10 @@ if st.session_state.results:
                 container,
                 fmt='$ {:,.0f}',
                 rotation=45,
-                padding=3,
-                fontsize=9,
+                padding=8,
+                fontsize=10,
                 color='black',
-                ha='left'
+                fontweight='bold'
             )
 
         ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
@@ -351,7 +339,6 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
     
-    # Prepare data for download button
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
