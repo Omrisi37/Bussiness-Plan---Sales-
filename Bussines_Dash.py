@@ -1,3 +1,4 @@
+# app.py
 
 import streamlit as st
 import pandas as pd
@@ -7,9 +8,11 @@ import seaborn as sns
 from scipy.interpolate import PchipInterpolator
 import io
 
-# --- Page Config ---
+# --- Page Config & Chart Styling ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
-sns.set_theme(style="whitegrid")
+# שינוי 1: עיצוב כללי חדש לכל הגרפים - רקע כהה ופונטים מוגדלים
+sns.set_theme(style="darkgrid", font_scale=1.1)
+
 
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
@@ -23,6 +26,7 @@ def to_excel(results_dict):
     """Creates an Excel file from the results dictionary."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Loop ONLY over products
         for product_name, data in results_dict.items():
             if product_name == 'summary':
                 continue
@@ -42,7 +46,7 @@ def to_excel(results_dict):
             writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + 5, column=1, value="Recommended Lead Contact Plan")
             
             df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 10, index=True)
-            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 9, column=1, value="Cumulative Customers (Quarterly)")
+            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 9, column=1, value="Cumulative Customers (Quarterly)")
 
             df_validation.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 14, index=True)
             writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 13, column=1, value="Target vs. Actual Revenue")
@@ -50,7 +54,7 @@ def to_excel(results_dict):
         if "summary" in results_dict:
             summary_data = results_dict["summary"]
             summary_revenue_df = summary_data["summary_revenue"]
-            summary_customers_df = summary_data["summary_customers_raw"]
+            summary_customers_df = summary_data["summary_customers_raw"] # Use raw data
             
             summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
             writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
@@ -64,6 +68,7 @@ def to_excel(results_dict):
 
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
+    """Main calculation engine for a single product."""
     START_YEAR = 2025
     NUM_YEARS = 6
     years = np.array([START_YEAR + i for i in range(NUM_YEARS)])
@@ -74,19 +79,15 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     tons_per_customer.loc[START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
     target_tons = {'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
-
     pen_rate_df = pd.DataFrame(index=range(1, NUM_YEARS + 1), columns=customer_types)
     for c_type in customer_types:
         total_market_growth_factor = (1 + market_gr / 100) ** (NUM_YEARS - 1)
-        if initial_tons[c_type] == 0: 
-            required_pen_growth_factor = 1.0
-        else: 
-            required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
+        if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
+        else: required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
         pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
         x, y = [1, 2.5, NUM_YEARS], [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final]
         interp_func = PchipInterpolator(x, y)
         pen_rate_df[c_type] = interp_func(range(1, NUM_YEARS + 1))
-
     for year_idx in range(1, NUM_YEARS):
         current_year, prev_year = years[year_idx], years[year_idx - 1]
         for c_type in customer_types:
@@ -107,18 +108,13 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
-    if total_focus == 0: 
-        return {"error": "Total Sales Focus must be greater than 0."}
+    if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
     focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
-    
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
-
     for i, q_date in enumerate(quarters_index):
-        if i == 0: 
-            prev_cumulative = pd.Series(0.0, index=customer_types)
-        else: 
-            prev_cumulative = cumulative_customers.iloc[i-1]
+        if i == 0: prev_cumulative = pd.Series(0.0, index=customer_types)
+        else: prev_cumulative = cumulative_customers.iloc[i-1]
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
@@ -129,7 +125,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
                 for c_type in customer_types:
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
-
     customers_df_quarterly_final = cumulative_customers
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
@@ -145,34 +140,28 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "error": None
     }
 
-# --- תיקון פונקציית הלידים ---
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
-    """
-    Calculate required leads per quarter for acquired customers,
-    ensuring perfect quarter alignment by comparing PeriodIndex (quarter level).
-    """
+    """Calculates leads based on a plan of acquired (integer) customers."""
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
-
+    
     for q_date, row in acquired_customers_plan.iterrows():
         for c_type in acquired_customers_plan.columns:
             new_cust_count = row[c_type]
             if new_cust_count > 0:
-                success_rate = success_rates[c_type] / 100.0
+                success_rate = success_rates[c_type] / 100
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
-
-                # Calculate the target quarter at the Period level
-                target_period = q_date.to_period('Q') - time_ahead_q
-
-                # Find the corresponding timestamp in the index by comparing Periods
-                idx_matches = lead_plan.index[lead_plan.index.to_period('Q') == target_period]
-
-                if len(idx_matches) > 0:
-                    lead_plan.loc[idx_matches[0], c_type] += int(leads_to_contact)
-
+                
+                contact_date = q_date - pd.DateOffset(months=time_ahead_q * 3)
+                
+                try:
+                    target_quarter = pd.Timestamp(contact_date).to_period('Q').to_timestamp(how='end', freq='Q')
+                    if target_quarter in lead_plan.index:
+                        lead_plan.loc[target_quarter, c_type] += leads_to_contact
+                except:
+                    pass
     return lead_plan.astype(int)
-
 
 # --- Main App UI ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
@@ -243,12 +232,11 @@ if run_button:
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
         
-        # New logic flow for leads
         final_cumulative = res["cumulative_customers"].round().astype(int)
         acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
         
         res['acquired_customers_plan'] = acquired_customers
-        res['cumulative_customers'] = final_cumulative # Overwrite with rounded version
+        res['cumulative_customers'] = final_cumulative
         res['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
         results_data[product] = res
     st.session_state.results = results_data
@@ -261,7 +249,6 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # Extract and format dataframes for display
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
 
@@ -278,7 +265,6 @@ if st.session_state.results:
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
             
-            # Display all tables
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
             st.dataframe(lead_plan_display.style.format("{:d}"))
@@ -293,17 +279,21 @@ if st.session_state.results:
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
             
-            # (Chart and Assumptions display remains the same)
             st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
             plot_df = validation_df.reset_index()
             plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
+            
+            # שינוי 2: גרף מוצר בודד
             fig, ax = plt.subplots(figsize=(12, 6))
-            sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette=['lightgray', 'skyblue'])
+            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="viridis")
             ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=16)
-            for p in ax.patches:
-                ax.annotate(f'${p.get_height():,.0f}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 9), textcoords='offset points', fontsize=9)
+            ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
+            
+            # שינוי 3: לולאה חדשה להוספת תוויות מרווחות
+            for container in barplot.containers:
+                ax.bar_label(container, fmt='$%.0f', padding=3, fontsize=9)
             st.pyplot(fig)
-
+            
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
@@ -325,16 +315,19 @@ if st.session_state.results:
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
         all_revenues = {p: results[p]['annual_revenue'] for p in st.session_state.products}
         summary_plot_df = pd.DataFrame(all_revenues)
+        
+        # שינוי 4: גרף סיכום כללי
         fig_sum, ax_sum = plt.subplots(figsize=(14, 7))
-        summary_plot_df.plot(kind='bar', stacked=True, ax=ax_sum, colormap='viridis')
+        summary_plot_df.plot(kind='bar', stacked=True, ax=ax_sum, colormap="plasma")
         
         for c in ax_sum.containers:
             labels = [f'${v/1_000_000:.1f}M' if v > sum(summary_plot_df.sum())*0.02 else '' for v in c.datavalues]
-            ax_sum.bar_label(c, labels=labels, label_type='center', color='white', weight='bold', fontsize=9)
+            ax_sum.bar_label(c, labels=labels, label_type='center', color='white', weight='bold', fontsize=9, padding=3)
         totals = summary_plot_df.sum(axis=1)
         for i, total in enumerate(totals):
             if total > 0:
-                ax_sum.text(i, total, f'${total:,.0f}', ha='center', va='bottom', weight='bold')
+                ax_sum.text(i, total, f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=10)
+        
         ax_sum.set_title('Total Revenue by Product (Stacked)', fontsize=16)
         ax_sum.set_ylabel('Revenue ($)'); ax_sum.set_xlabel('Year')
         ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
