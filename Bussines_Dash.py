@@ -140,26 +140,30 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     }
 
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
-    """Calculates leads based on a plan of acquired (integer) customers."""
+    """
+    Calculate required leads per quarter for acquired customers,
+    ensuring perfect quarter alignment by comparing PeriodIndex (quarter level).
+    """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
-    
+
     for q_date, row in acquired_customers_plan.iterrows():
         for c_type in acquired_customers_plan.columns:
             new_cust_count = row[c_type]
             if new_cust_count > 0:
-                success_rate = success_rates[c_type] / 100
+                success_rate = success_rates[c_type] / 100.0
                 time_ahead_q = time_aheads_in_quarters[c_type]
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
-                
-                contact_date = q_date - pd.DateOffset(months=time_ahead_q * 3)
-                
-                try:
-                    target_quarter = pd.Timestamp(contact_date).to_period('Q').to_timestamp(how='end', freq='Q')
-                    if target_quarter in lead_plan.index:
-                        lead_plan.loc[target_quarter, c_type] += leads_to_contact
-                except:
-                    pass
+
+                # Calculate the target quarter at the Period level
+                target_period = q_date.to_period('Q') - time_ahead_q
+
+                # Find the corresponding timestamp in the index by comparing Periods
+                idx_matches = lead_plan.index[lead_plan.index.to_period('Q') == target_period]
+
+                if len(idx_matches) > 0:
+                    lead_plan.loc[idx_matches[0], c_type] += int(leads_to_contact)
+
     return lead_plan.astype(int)
 
 # --- Main App UI ---
