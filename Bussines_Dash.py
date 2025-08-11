@@ -1,4 +1,3 @@
-# app.py
 
 import streamlit as st
 import pandas as pd
@@ -24,7 +23,6 @@ def to_excel(results_dict):
     """Creates an Excel file from the results dictionary."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Loop ONLY over products
         for product_name, data in results_dict.items():
             if product_name == 'summary':
                 continue
@@ -44,7 +42,7 @@ def to_excel(results_dict):
             writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + 5, column=1, value="Recommended Lead Contact Plan")
             
             df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 10, index=True)
-            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + 9, column=1, value="Cumulative Customers (Quarterly)")
+            writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 9, column=1, value="Cumulative Customers (Quarterly)")
 
             df_validation.to_excel(writer, sheet_name=product_name, startrow=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 14, index=True)
             writer.sheets[product_name].cell(row=df_acquired_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 13, column=1, value="Target vs. Actual Revenue")
@@ -52,7 +50,7 @@ def to_excel(results_dict):
         if "summary" in results_dict:
             summary_data = results_dict["summary"]
             summary_revenue_df = summary_data["summary_revenue"]
-            summary_customers_df = summary_data["summary_customers_raw"] # Use raw data
+            summary_customers_df = summary_data["summary_customers_raw"]
             
             summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
             writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
@@ -66,7 +64,6 @@ def to_excel(results_dict):
 
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
-    """Main calculation engine for a single product."""
     START_YEAR = 2025
     NUM_YEARS = 6
     years = np.array([START_YEAR + i for i in range(NUM_YEARS)])
@@ -77,15 +74,19 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     tons_per_customer.loc[START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
     target_tons = {'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
+
     pen_rate_df = pd.DataFrame(index=range(1, NUM_YEARS + 1), columns=customer_types)
     for c_type in customer_types:
         total_market_growth_factor = (1 + market_gr / 100) ** (NUM_YEARS - 1)
-        if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
-        else: required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
+        if initial_tons[c_type] == 0: 
+            required_pen_growth_factor = 1.0
+        else: 
+            required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
         pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
         x, y = [1, 2.5, NUM_YEARS], [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final]
         interp_func = PchipInterpolator(x, y)
         pen_rate_df[c_type] = interp_func(range(1, NUM_YEARS + 1))
+
     for year_idx in range(1, NUM_YEARS):
         current_year, prev_year = years[year_idx], years[year_idx - 1]
         for c_type in customer_types:
@@ -106,13 +107,18 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
-    if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
+    if total_focus == 0: 
+        return {"error": "Total Sales Focus must be greater than 0."}
     focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
+    
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
+
     for i, q_date in enumerate(quarters_index):
-        if i == 0: prev_cumulative = pd.Series(0.0, index=customer_types)
-        else: prev_cumulative = cumulative_customers.iloc[i-1]
+        if i == 0: 
+            prev_cumulative = pd.Series(0.0, index=customer_types)
+        else: 
+            prev_cumulative = cumulative_customers.iloc[i-1]
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
@@ -123,6 +129,7 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
                 for c_type in customer_types:
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
+
     customers_df_quarterly_final = cumulative_customers
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
@@ -138,11 +145,11 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "error": None
     }
 
+# --- תיקון פונקציית הלידים ---
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
     """
-    Calculates leads needed, given acquired customers per quarter,
-    desired success rates, and quarters-ahead for each customer type.
-    Puts the required leads in the right previous quarter for each acquisition.
+    Calculate required leads per quarter, for acquired customers,
+    placing them in the correct previous quarter according to settings.
     """
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
@@ -153,20 +160,15 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
             if new_cust_count > 0:
                 success_rate = success_rates[c_type] / 100.0
                 time_ahead_q = time_aheads_in_quarters[c_type]
-                
-                # מספר הלידים הדרוש
                 leads_to_contact = np.ceil(new_cust_count / success_rate if success_rate > 0 else 0)
-                
-                # חשב את רבעון המקור (time_ahead_r כמות רבעונים אחורה)
+
+                # חישוב רבעון יעד אחורה
                 contact_quarter_period = q_date.to_period('Q') - time_ahead_q
-                # ממיר לרבעון (סוף רבעון, תואם אינדקס)
                 contact_quarter = contact_quarter_period.to_timestamp(how='end')
-                
-                # עדכן את הליד ברבעון הנכון
+
                 if contact_quarter in lead_plan.index:
                     lead_plan.loc[contact_quarter, c_type] += int(leads_to_contact)
     return lead_plan.astype(int)
-
 # --- Main App UI ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
 
