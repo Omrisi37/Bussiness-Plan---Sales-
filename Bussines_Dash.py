@@ -289,6 +289,7 @@ if st.session_state.results:
             
             fig, ax = plt.subplots(figsize=(14, 7))
             barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
+            
             ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=18, weight='bold')
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
             ax.set_xlabel("Year", fontsize=12)
@@ -297,7 +298,8 @@ if st.session_state.results:
             for container in barplot.containers:
                 ax.bar_label(container, fmt='$%.0f', padding=5, fontsize=9, rotation=45, color='black', ha='left')
             st.pyplot(fig)
-            
+
+            # הוספת הטבלה החסרה
             with st.expander("View Underlying Assumptions"):
                 st.markdown("#### Table 4: Annual Tons per Single Customer (Target-Driven)")
                 st.dataframe(tons_per_customer_df.T.style.format("{:,.2f}"))
