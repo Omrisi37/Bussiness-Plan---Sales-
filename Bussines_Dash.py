@@ -21,24 +21,26 @@ if 'results' not in st.session_state:
 # --- פונקציות עזר ---
 @st.cache_data
 def to_excel(results_dict):
+    """Creates an Excel file from the results dictionary."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Loop ONLY over products (all keys except 'summary')
+        # Loop ONLY over products
         for product_name, data in results_dict.items():
             if product_name == 'summary':
                 continue
 
+            # Prepare dataframes for the sheet
             df_new_cust_T = data['new_customers_plan'].round(2).T
             df_lead_plan_T = data['lead_plan'].T
-            
             cum_cust_quarterly = data["cumulative_customers"].round().astype(int)
             df_cum_cust_q_T = cum_cust_quarterly.T
-
             df_validation = data['validation_df']
-            
+
+            # Format columns for all transposed quarterly tables
             for df in [df_new_cust_T, df_lead_plan_T, df_cum_cust_q_T]:
                 df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
 
+            # Write dataframes to the sheet with titles
             df_new_cust_T.to_excel(writer, sheet_name=product_name, startrow=2, index=True)
             writer.sheets[product_name].cell(row=1, column=1, value="Recommended New Customers per Quarter")
             
@@ -51,6 +53,7 @@ def to_excel(results_dict):
             df_validation.to_excel(writer, sheet_name=product_name, startrow=df_new_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 14, index=True)
             writer.sheets[product_name].cell(row=df_new_cust_T.shape[0] + df_lead_plan_T.shape[0] + df_cum_cust_q_T.shape[0] + 13, column=1, value="Target vs. Actual Revenue")
 
+        # Handle the summary sheet separately
         if "summary" in results_dict:
             summary_data = results_dict["summary"]
             summary_data["summary_revenue"].to_excel(writer, sheet_name="Overall Summary", startrow=2, index=True)
@@ -61,23 +64,23 @@ def to_excel(results_dict):
             summary_customers_df.to_excel(writer, sheet_name="Overall Summary", startrow=10, index=True)
             writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
 
-    processed_data = output.getvalue()
-    return processed_data
+    return output.getvalue()
 
 # --- פונקציות החישוב המרכזיות ---
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr):
+    """Main calculation engine for a single product."""
     START_YEAR = 2025
     NUM_YEARS = 6
     years = np.array([START_YEAR + i for i in range(NUM_YEARS)])
     quarters_index = pd.date_range(start=f'{START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
     customer_types = ['Medium', 'Large', 'Global']
+    
     tons_per_customer = pd.DataFrame(index=years, columns=customer_types, dtype=float)
     tons_per_customer.loc[START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
     target_tons = {'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
     pen_rate_df = pd.DataFrame(index=range(1, NUM_YEARS + 1), columns=customer_types)
-    pen_rate_df.index.name = 'Year #'
     for c_type in customer_types:
         total_market_growth_factor = (1 + market_gr / 100) ** (NUM_YEARS - 1)
         if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
@@ -118,7 +121,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
     
-    # סינכרון אינדקסים לפני החזרת הנתונים
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
     annual_revenue_series.index = years
     annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
@@ -128,11 +130,10 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "cumulative_customers": customers_df_quarterly_final,
         "annual_revenue": annual_revenue_series,
         "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_per_customer": tons_per_customer,
-        "pen_rate_df": pen_rate_df,
         "error": None
     }
 def create_lead_plan(new_customers_plan, success_rates, time_aheads):
+    """Calculates the required leads to contact based on the acquisition plan."""
     lead_plan = pd.DataFrame(0.0, index=new_customers_plan.index, columns=new_customers_plan.columns)
     for q_date, row in new_customers_plan.iterrows():
         for c_type in new_customers_plan.columns:
@@ -150,10 +151,9 @@ def create_lead_plan(new_customers_plan, success_rates, time_aheads):
                     pass
     return lead_plan.astype(int)
 
-# --- הגדרת כותרת ראשית ---
+# --- Main App UI ---
 st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
 
-# --- הגדרת ממשק המשתמש בסרגל הצד (Sidebar) ---
 with st.sidebar:
     st.title("Business Plan Controls")
     with st.expander("Manage Products"):
@@ -173,7 +173,7 @@ with st.sidebar:
         for c_type in customer_types_for_leads:
             lead_params['success_rates'][c_type] = st.slider(f'Success Rate (%) - {c_type}', 0, 100, 50, key=f'sr_{c_type}')
             lead_params['time_aheads'][c_type] = st.slider(f'Time Ahead (Months) - {c_type}', 0, 24, 8, key=f'ta_{c_type}')
-
+    
     product_inputs = {}
     for product in st.session_state.products:
         st.header(product)
@@ -185,7 +185,6 @@ with st.sidebar:
         with st.expander(f"2. Customer Value Growth", expanded=False):
             product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, 6.4, 0.1, key=f'mgr_{product}')
             product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, 7.5, 0.1, key=f'pen_y1_{product}')
-            st.markdown("---")
             product_inputs[product]['tt_m'] = st.number_input('Target Tons/Cust Year 5 - Medium:', 0.0, value=89.0, key=f'tt_m_{product}')
             product_inputs[product]['tt_l'] = st.number_input('Target Tons/Cust Year 5 - Large:', 0.0, value=223.0, key=f'tt_l_{product}')
             product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=536.0, key=f'tt_g_{product}')
@@ -209,19 +208,16 @@ with st.sidebar:
     
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
 
-# --- הרצה וסיכום ---
+# --- App Logic and Display ---
 if run_button:
     results_data = {}
-    has_error = False
     for product in st.session_state.products:
         res = calculate_plan(**product_inputs[product])
         if res.get("error"):
-            st.error(f"Error for {product}: {res['error']}"); has_error = True; break
-        # Calculate lead plan and add it to the results dictionary for this product
+            st.error(f"Error for {product}: {res['error']}"); st.stop()
         res['lead_plan'] = create_lead_plan(res["new_customers_plan"], **lead_params)
         results_data[product] = res
-    if not has_error:
-        st.session_state.results = results_data
+    st.session_state.results = results_data
 
 if st.session_state.results:
     results = st.session_state.results
@@ -231,48 +227,49 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # Extract dataframes from results
-            lead_plan = results[product_name]["lead_plan"]
-            new_customers_plan = results[product_name]["new_customers_plan"]
-            cum_cust_quarterly = results[product_name]["cumulative_customers"].round().astype(int)
-            validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'],'Actual Revenue': results[product_name]['annual_revenue']})
-            validation_df.index.name = "Year"
-            results[product_name]['validation_df'] = validation_df # Save for excel export
+            # --- Display logic with formatting fix ---
+            lead_plan_display = results[product_name]["lead_plan"].T
+            lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
+
+            new_customers_display = results[product_name]["new_customers_plan"].T
+            new_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in new_customers_display.columns]
             
-            # Format and display tables
+            cum_cust_display = results[product_name]["cumulative_customers"].round().astype(int).T
+            cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
+
+            validation_df = pd.DataFrame({
+                'Target Revenue': results[product_name]['annual_revenue_targets'],
+                'Actual Revenue': results[product_name]['annual_revenue']
+            })
+            validation_df.index.name = "Year"
+            results[product_name]['validation_df'] = validation_df
+            
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
-            lead_plan_display = lead_plan.T
-            lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
             st.dataframe(lead_plan_display.style.format("{:d}"))
 
             st.subheader("Action Plan & Outcomes")
             st.markdown("#### Table 1: Recommended New Customers to Acquire per Quarter")
-            st.info("Note: This table shows the precise fractional number of customers required to meet the revenue target. The cumulative table below shows the rounded, whole number of customers.")
-            new_customers_display = new_customers_plan.T
-            new_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in new_customers_display.columns]
+            st.info("Note: This shows the precise fractional number of customers required. Table 2 shows the rounded cumulative count.")
             st.dataframe(new_customers_display.style.format("{:,.2f}"))
 
             st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
-            cum_cust_display = cum_cust_quarterly.T
-            cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
             st.dataframe(cum_cust_display.style.format("{:,d}"))
 
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
             
             st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
-            plot_df = validation_df.reset_index() # Ensure 'Year' is a column for seaborn
-            plot_df = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
+            plot_df = validation_df.reset_index()
+            plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
             fig, ax = plt.subplots(figsize=(12, 6))
-            sns.barplot(data=plot_df, x='Year', y='Revenue', hue='Type', ax=ax, palette=['lightgray', 'skyblue'])
+            sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette=['lightgray', 'skyblue'])
             ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=16)
             st.pyplot(fig)
 
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
-        # Aggregate data for summary
         summary_revenue_list = [results[p]['annual_revenue'] for p in st.session_state.products]
         summary_revenue = pd.concat(summary_revenue_list, axis=1).sum(axis=1)
         
@@ -306,11 +303,9 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
     
-    # Prepare data for download button
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
-        # Ensure lead plan is calculated for each product for the download
         excel_results_to_pass[prod_name]['lead_plan'] = create_lead_plan(res_data["new_customers_plan"], **lead_params)
     
     summary_for_excel = {
