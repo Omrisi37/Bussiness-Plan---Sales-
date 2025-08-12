@@ -256,7 +256,7 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
     return lead_plan.astype(int)
 
 # --- UI and Logic ---
-st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
+st.title("Dynamic Multi-Product Business Plan Dashboard")
 
 with st.sidebar:
     st.title("Business Plan Controls")
