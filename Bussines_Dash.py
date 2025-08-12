@@ -461,68 +461,70 @@ if st.session_state.results:
     product_list = list(st.session_state.get('products', []))
     tabs = st.tabs([*product_list, "Overall Summary"])
     
+    # =======================================================
+    #               *** START OF NEW CODE ***
+    # הגדרת תאריך ההתחלה החדש לתצוגה
+    display_start_date = pd.Timestamp('2025-07-01') # Q3 2025
+    # =======================================================
+
     for i, product_name in enumerate(product_list):
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
+            # --- סינון התוצאות הרבעוניות לפני ההצגה ---
+            leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
+            acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
+            cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
+
             # --- טבלה 0 + גרף 0 ---
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
-            lead_plan_display = results[product_name]["lead_plan"].T
-            lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
-            st.dataframe(lead_plan_display.style.format("{:d}"))
+            lead_plan_display_T = leads_to_display.T
+            lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
+            st.dataframe(lead_plan_display_T.style.format("{:d}"))
 
-            # --- START of new chart code ---
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
             fig0 = create_yearly_bar_chart(
-                df_quarterly=results[product_name]["lead_plan"],
+                df_quarterly=leads_to_display, # שימוש במידע המסונן
                 title=f"Leads to Contact per Year - {product_name}",
                 y_axis_label="Number of Leads to Contact"
             )
             st.pyplot(fig0)
             st.markdown("---")
-            # --- END of new chart code ---
-
 
             # --- טבלה 1 + גרף 1 ---
             st.subheader("Action Plan & Outcomes")
             st.markdown("#### Table 1: Acquired New Customers per Quarter")
-            acquired_customers_display = results[product_name]["acquired_customers_plan"].T
-            acquired_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display.columns]
-            st.dataframe(acquired_customers_display.style.format("{:d}"))
+            acquired_customers_display_T = acquired_to_display.T
+            acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
+            st.dataframe(acquired_customers_display_T.style.format("{:d}"))
 
-            # --- START of new chart code ---
             st.markdown("##### Chart 1: Yearly Acquired New Customers")
             fig1 = create_yearly_bar_chart(
-                df_quarterly=results[product_name]["acquired_customers_plan"],
+                df_quarterly=acquired_to_display, # שימוש במידע המסונן
                 title=f"Acquired New Customers per Year - {product_name}",
                 y_axis_label="Number of New Customers"
             )
             st.pyplot(fig1)
             st.markdown("---")
-            # --- END of new chart code ---
-
 
             # --- טבלה 2 + גרף 2 ---
             st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
-            cum_cust_display = results[product_name]["cumulative_customers"].T
-            cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
-            st.dataframe(cum_cust_display.style.format("{:,d}"))
+            cum_cust_display_T = cumulative_to_display.T
+            cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
+            st.dataframe(cum_cust_display_T.style.format("{:,d}"))
 
-            # --- START of new chart code ---
             st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
             fig2 = create_yearly_bar_chart(
-                df_quarterly=results[product_name]["cumulative_customers"],
+                df_quarterly=cumulative_to_display, # שימוש במידע המסונן
                 title=f"Cumulative Customers at Year End - {product_name}",
                 y_axis_label="Total Number of Customers",
                 is_cumulative=True
             )
             st.pyplot(fig2)
             st.markdown("---")
-            # --- END of new chart code ---
-
             
-            # --- שאר התוצאות (טבלה 3, גרף הכנסות וכו') ---
+            # --- שאר התוצאות (שנתיות, לא דורשות סינון רבעוני) ---
             validation_df = pd.DataFrame({
                 'Target Revenue': results[product_name]['annual_revenue_targets'],
                 'Actual Revenue': results[product_name]['annual_revenue']
@@ -548,7 +550,6 @@ if st.session_state.results:
                 ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
             st.pyplot(fig)
 
-            # --- טבלאות נסתרות ---
             with st.expander("View Underlying Assumptions"):
                 tons_per_customer_df = results[product_name].get('tons_per_customer')
                 pen_rate_df = results[product_name].get('pen_rate_df')
@@ -564,20 +565,22 @@ if st.session_state.results:
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
+        # הסיכום השנתי לא דורש שינוי, הוא יסכם את מה שקיים
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
+        # סינון גם בטבלת הסיכום הרבעונית
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
-        summary_customers_total_q = summary_customers_total_q_raw.round().astype(int)
-        
+        summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
+
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
 
-        summary_customers_display = summary_customers_total_q.to_frame(name="Total Customers").T
-        summary_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display.columns]
+        summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
+        summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
         st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
-        st.dataframe(summary_customers_display.style.format("{:,d}"))
+        st.dataframe(summary_customers_display_T.style.format("{:,d}"))
 
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
         all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
@@ -585,19 +588,10 @@ if st.session_state.results:
         summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
         
         fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
-        
         summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
 
         for container in ax_sum.containers:
-            ax_sum.bar_label(
-                container,
-                fmt='$ {:,.0f}',
-                rotation=45,
-                padding=8,
-                fontsize=10,
-                color='black',
-                fontweight='bold'
-            )
+            ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
 
         ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
         ax_sum.set_ylabel('Revenue ($)', fontsize=12)
