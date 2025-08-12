@@ -10,6 +10,14 @@ from google.cloud import firestore
 
 import base64
 import json
+def safe_set_session_state_from_loaded_data(data):
+    for key, value in data.items():
+        try:
+            json.dumps(value)  # לבדוק אם הערך ניתן לסידור
+            st.session_state[key] = value
+        except (TypeError, ValueError):
+            # אם אי אפשר לסדר, נשמור גרסה מומרת למחרוזת
+            st.session_state[key] = str(value)
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
