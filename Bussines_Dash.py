@@ -498,11 +498,7 @@ if st.session_state.results:
     product_list = list(st.session_state.get('products', []))
     tabs = st.tabs([*product_list, "Overall Summary"])
     
-    # =======================================================
-    #               *** START OF NEW CODE ***
-    # הגדרת תאריך ההתחלה החדש לתצוגה
     display_start_date = pd.Timestamp('2025-07-01') # Q3 2025
-    # =======================================================
 
     for i, product_name in enumerate(product_list):
         with tabs[i]:
@@ -522,7 +518,7 @@ if st.session_state.results:
 
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
             fig0 = create_yearly_bar_chart(
-                df_quarterly=leads_to_display, # שימוש במידע המסונן
+                df_quarterly=leads_to_display,
                 title=f"Leads to Contact per Year - {product_name}",
                 y_axis_label="Number of Leads to Contact"
             )
@@ -538,7 +534,7 @@ if st.session_state.results:
 
             st.markdown("##### Chart 1: Yearly Acquired New Customers")
             fig1 = create_yearly_bar_chart(
-                df_quarterly=acquired_to_display, # שימוש במידע המסונן
+                df_quarterly=acquired_to_display,
                 title=f"Acquired New Customers per Year - {product_name}",
                 y_axis_label="Number of New Customers"
             )
@@ -553,7 +549,7 @@ if st.session_state.results:
 
             st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
             fig2 = create_yearly_bar_chart(
-                df_quarterly=cumulative_to_display, # שימוש במידע המסונן
+                df_quarterly=cumulative_to_display,
                 title=f"Cumulative Customers at Year End - {product_name}",
                 y_axis_label="Total Number of Customers",
                 is_cumulative=True
@@ -561,7 +557,7 @@ if st.session_state.results:
             st.pyplot(fig2)
             st.markdown("---")
             
-            # --- שאר התוצאות (שנתיות, לא דורשות סינון רבעוני) ---
+            # --- שאר התוצאות ---
             validation_df = pd.DataFrame({
                 'Target Revenue': results[product_name]['annual_revenue_targets'],
                 'Actual Revenue': results[product_name]['annual_revenue']
@@ -602,11 +598,9 @@ if st.session_state.results:
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
-        # הסיכום השנתי לא דורש שינוי, הוא יסכם את מה שקיים
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
-        # סינון גם בטבלת הסיכום הרבעונית
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
         summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
@@ -637,6 +631,10 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
     
+    # =======================================================
+    #               *** START OF MOVED CODE ***
+    # כל הקוד הזה הוזז להיות בתוך בלוק ה-if
+    # =======================================================
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
@@ -648,6 +646,9 @@ if st.session_state.results:
     
     excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
     st.download_button(label="📥 Download Full Report to Excel", data=excel_data, file_name="Business_Plan_Full_Report.xlsx")
+    # =======================================================
+    #               *** END OF MOVED CODE ***
+    # =======================================================
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
