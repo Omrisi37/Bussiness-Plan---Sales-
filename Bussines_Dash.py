@@ -158,6 +158,21 @@ def save_scenario(user_id, scenario_name, data):
     except Exception as e:
         st.sidebar.error(f"Error saving scenario: {e}")
 
+def load_slider_values_into_session_state(data, slider_keys):
+    for key in slider_keys:
+        if key in data:
+            try:
+                value = data[key]
+                # אם הערך הוא מספר או רשימה פשוטה – נשמור אותו
+                if isinstance(value, (int, float, str)):
+                    st.session_state[key] = value
+                elif isinstance(value, list) and all(isinstance(v, (int, float, str)) for v in value):
+                    st.session_state[key] = value
+                else:
+                    # להמיר כל דבר לא נתמך למחרוזת
+                    st.session_state[key] = str(value)
+            except Exception as e:
+                st.warning(f"לא ניתן לטעון את הערך של {key}: {e}")
 
 def get_user_scenarios(user_id):
     if not db or not user_id:
