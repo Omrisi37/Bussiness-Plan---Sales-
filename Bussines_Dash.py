@@ -74,15 +74,21 @@ def deserialize_from_firestore(value):
     return value
 
 
-def safe_set_session_state_from_loaded_data(loaded_data):
-    """טעינה בטוחה של הנתונים ל־session_state"""
-    for key, value in loaded_data.items():
+def safe_set_session_state_from_loaded_data(data):
+    for key, value in data.items():
         try:
-            st.session_state[key] = deserialize_from_firestore(value)
-        except Exception as e:
-            # אם לא ניתן לשחזר, נשמור את הייצוג המקורי
+            json.dumps(value)  # לבדוק אם הערך ניתן לסידור
             st.session_state[key] = value
-
+        except (TypeError, ValueError):
+            try:
+                # אם הערך ניתן להמרה לרשימה או מילון פשוט
+                if hasattr(value, 'tolist'):
+                    st.session_state[key] = value.tolist()
+                else:
+                    st.session_state[key] = str(value)
+            except Exception:
+                st.session_state[key] = str(value)
+                
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
     st.session_state.products = ["Product A", "Product B"]
