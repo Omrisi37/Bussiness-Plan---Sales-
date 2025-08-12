@@ -7,17 +7,8 @@ from scipy.interpolate import PchipInterpolator
 import io
 from google.oauth2 import service_account
 from google.cloud import firestore
-
 import base64
 import json
-def safe_set_session_state_from_loaded_data(data):
-    for key, value in data.items():
-        try:
-            json.dumps(value)  # לבדוק אם הערך ניתן לסידור
-            st.session_state[key] = value
-        except (TypeError, ValueError):
-            # אם אי אפשר לסדר, נשמור גרסה מומרת למחרוזת
-            st.session_state[key] = str(value)
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
@@ -28,7 +19,6 @@ sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 # =========================
 def serialize_for_firestore(value):
     """המרה לאובייקט שניתן לשמור ב־Firestore וב־session_state"""
-    # טיפוסי פנדס
     if isinstance(value, pd.DataFrame):
         return {"__type__": "DataFrame", "data": value.to_dict(orient='split')}
     elif isinstance(value, pd.Series):
@@ -37,25 +27,20 @@ def serialize_for_firestore(value):
         return {"__type__": "Timestamp", "data": value.isoformat()}
     elif isinstance(value, bytes):
         return {"__type__": "Bytes", "data": base64.b64encode(value).decode('utf-8')}
-    # טיפוסים פשוטים
     elif isinstance(value, (str, int, float, bool, type(None))):
         return value
-    # רשימות ומילונים - נוודא שהם עצמם ניתנים לסיריאליזציה
     elif isinstance(value, list):
         return [serialize_for_firestore(v) for v in value]
     elif isinstance(value, dict):
         return {k: serialize_for_firestore(v) for k, v in value.items()}
     else:
-        # טיפוס לא מוכר - נשמור כמחרוזת
         return {"__type__": "str", "data": str(value)}
-
 
 def deserialize_from_firestore(value):
     """שחזור הערך לסוג המקורי לאחר טעינה"""
     if isinstance(value, dict) and "__type__" in value:
         t = value["__type__"]
         if t == "DataFrame":
-            # value['data'] הוא dict של orient='split'
             return pd.DataFrame(**value["data"])
         elif t == "Series":
             return pd.Series(value["data"])
@@ -65,30 +50,12 @@ def deserialize_from_firestore(value):
             return base64.b64decode(value["data"])
         elif t == "str":
             return value["data"]
-    # אם זה רשימה או מילון של ערכים שסיריאלזו
     if isinstance(value, list):
         return [deserialize_from_firestore(v) for v in value]
     if isinstance(value, dict):
-        # אין __type__ אבל זה מילון - ננסה לשחזר כל ערך בו
         return {k: deserialize_from_firestore(v) for k, v in value.items()}
     return value
 
-
-def safe_set_session_state_from_loaded_data(data):
-    for key, value in data.items():
-        try:
-            json.dumps(value)  # לבדוק אם הערך ניתן לסידור
-            st.session_state[key] = value
-        except (TypeError, ValueError):
-            try:
-                # אם הערך ניתן להמרה לרשימה או מילון פשוט
-                if hasattr(value, 'tolist'):
-                    st.session_state[key] = value.tolist()
-                else:
-                    st.session_state[key] = str(value)
-            except Exception:
-                st.session_state[key] = str(value)
-                
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
     st.session_state.products = ["Product A", "Product B"]
@@ -148,7 +115,6 @@ def save_scenario(user_id, scenario_name, data):
         st.sidebar.warning("User ID and Scenario Name are required to save.")
         return
     try:
-        # בחר רק את המפתחות המתאימים ושמור בערכים שסיריאליזו
         data_to_save = {}
         for k, v in data.items():
             if isinstance(k, str) and k not in ['results', 'load_scenario_select', 'scenario_name', 'new_product_name_input'] and not k.startswith(('FormSubmitter', '_')):
@@ -157,22 +123,6 @@ def save_scenario(user_id, scenario_name, data):
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
     except Exception as e:
         st.sidebar.error(f"Error saving scenario: {e}")
-
-def load_slider_values_into_session_state(data, slider_keys):
-    for key in slider_keys:
-        if key in data:
-            try:
-                value = data[key]
-                # אם הערך הוא מספר או רשימה פשוטה – נשמור אותו
-                if isinstance(value, (int, float, str)):
-                    st.session_state[key] = value
-                elif isinstance(value, list) and all(isinstance(v, (int, float, str)) for v in value):
-                    st.session_state[key] = value
-                else:
-                    # להמיר כל דבר לא נתמך למחרוזת
-                    st.session_state[key] = str(value)
-            except Exception as e:
-                st.warning(f"לא ניתן לטעון את הערך של {key}: {e}")
 
 def get_user_scenarios(user_id):
     if not db or not user_id:
@@ -183,7 +133,6 @@ def get_user_scenarios(user_id):
     except Exception as e:
         st.sidebar.error(f"Error fetching scenarios: {e}")
         return [""]
-
 
 def load_scenario_data(user_id, scenario_name):
     if not db or not user_id or not scenario_name:
@@ -308,18 +257,31 @@ with st.sidebar:
             with col_load:
                 if len(saved_scenarios) > 1:
                     selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
+                    
+                    # =======================================================
+                    #               *** START OF FIX ***
+                    # =======================================================
                     if st.button("Load") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
                         if loaded_data:
+                            # 1. Clear previous results to avoid conflicts
                             st.session_state.results = {}
-                            safe_set_session_state_from_loaded_data(loaded_data)
-                            st.experimental_rerun()
+                            
+                            # 2. Deserialize every value before putting it into session_state
+                            for key, value in loaded_data.items():
+                                st.session_state[key] = deserialize_from_firestore(value)
+                            
+                            # 3. Rerun the app to reflect the loaded state in the UI
+                            st.rerun()
+                    # =======================================================
+                    #                *** END OF FIX ***
+                    # =======================================================
+                            
                 else:
                     st.caption("No scenarios found.")
             with col_save:
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
                 if st.button("Save Current") and scenario_name_to_save:
-                    # אסוף את כל המפתחות הרצויים מה-session_state
                     all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
                     for key, value in st.session_state.items():
                         if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
@@ -328,14 +290,17 @@ with st.sidebar:
                     save_scenario(st.session_state.get('user_id', user_id), scenario_name_to_save, all_inputs)
 
     with st.expander("Manage Products"):
-        for i, product_name in enumerate(st.session_state.get('products', ["Product A", "Product B"])):
-            st.session_state.products[i] = st.text_input(f"Product {i+1} Name", value=st.session_state.get(f"pname_{i}", product_name), key=f"pname_{i}")
+        # Use a copy to iterate while allowing modification
+        current_products = st.session_state.get('products', []).copy()
+        for i, product_name in enumerate(current_products):
+            # Update the name in the original list
+            st.session_state.products[i] = st.text_input(f"Product {i+1} Name", value=product_name, key=f"pname_{i}")
         
         new_product_name = st.text_input("New Product Name", key="new_product_name_input")
         if st.button("Add Product") and new_product_name:
             if new_product_name not in st.session_state.products:
                 st.session_state.products.append(new_product_name)
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.warning("Product name already exists.")
 
@@ -351,7 +316,8 @@ with st.sidebar:
             lead_params['time_aheads_in_quarters'][c_type] = st.slider(f'Time Ahead (Quarters) - {c_type}', 1, 12, st.session_state.get(ta_key, ta_defaults[c_type]), key=ta_key)
     
     product_inputs = {}
-    for product in st.session_state.products:
+    # Iterate over a copy of the list to prevent issues if it's modified during the loop
+    for product in st.session_state.get('products', []).copy():
         st.header(product)
         product_inputs[product] = {}
         with st.expander(f"1. Initial Customer Value", expanded=False):
@@ -371,7 +337,9 @@ with st.sidebar:
             for i in range(6):
                 year_num = i + 1
                 key = f'rev_y{year_num}_{product}'
-                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, st.session_state.get(key, default_revenues[i]), 100000, format="$%d", key=key)
+                # Retrieve the value from session state, which is now correctly populated upon load
+                default_val = st.session_state.get(key, default_revenues[i])
+                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, default_val, 100000, format="$%d", key=key)
                 rev_targets.append(rev_slider_val)
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
@@ -389,7 +357,8 @@ with st.sidebar:
 # --- App Logic and Display ---
 if run_button:
     results_data = {}
-    for product in st.session_state.products:
+    # Use a copy of the list to avoid issues if it's modified
+    for product in st.session_state.get('products', []).copy():
         res = calculate_plan(**product_inputs[product])
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
@@ -405,9 +374,10 @@ if run_button:
 
 if st.session_state.results:
     results = st.session_state.results
-    tabs = st.tabs([*st.session_state.products, "Overall Summary"])
+    product_list = list(st.session_state.get('products', []))
+    tabs = st.tabs([*product_list, "Overall Summary"])
     
-    for i, product_name in enumerate(st.session_state.products):
+    for i, product_name in enumerate(product_list):
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
@@ -454,7 +424,6 @@ if st.session_state.results:
             ax.set_ylabel("Revenue", fontsize=12)
             # הוספת הטבלאות החסרות
             with st.expander("View Underlying Assumptions"):
-                # שליפת הדאטה פריימים מהתוצאות
                 tons_per_customer_df = results[product_name].get('tons_per_customer')
                 pen_rate_df = results[product_name].get('pen_rate_df')
                 
@@ -472,10 +441,10 @@ if st.session_state.results:
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
-        summary_revenue_list = [results[p]['annual_revenue'] for p in st.session_state.products]
+        summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         
-        summary_customers_list = [results[p]['cumulative_customers'] for p in st.session_state.products]
+        summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
         summary_customers_total_q = summary_customers_total_q_raw.round().astype(int)
         
@@ -488,7 +457,7 @@ if st.session_state.results:
         st.dataframe(summary_customers_display.style.format("{:,d}"))
 
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
-        all_revenues = {p: results[p]['annual_revenue'] for p in st.session_state.products}
+        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
         summary_plot_df = pd.DataFrame(all_revenues)
         summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
         
