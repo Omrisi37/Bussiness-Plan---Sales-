@@ -9,48 +9,71 @@ from google.oauth2 import service_account
 from google.cloud import firestore
 
 import base64
-import pandas as pd
-
-def clean_value_for_session_state(value):
-    if isinstance(value, (str, int, float, bool, type(None), list, dict)):
-        return value
-    elif isinstance(value, pd.DataFrame):
-        # המרה למילון עם orient='split' לשחזור נוח
-        return value.to_dict(orient='split')
-    elif isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    elif isinstance(value, bytes):
-        # המרה למחרוזת base64
-        return base64.b64encode(value).decode('utf-8')
-    else:
-        return str(value)
-
-def safe_set_session_state_from_loaded_data(loaded_data):
-    for key, value in loaded_data.items():
-        cleaned_value = clean_value_for_session_state(value)
-        st.session_state[key] = cleaned_value
-
-# === פונקציות עזר לטעינה בטוחה ל-session_state === #
-def is_json_serializable(value):
-    """בודק אם הערך הוא מסוג שמותר ב-session_state ישירות."""
-    basic_types = (str, int, float, bool, type(None), list, dict)
-    if isinstance(value, basic_types):
-        return True
-    return False
-
-def safe_set_session_state_from_loaded_data(loaded_data):
-    """מעדכן את ה-session_state בערכים טעונים בצורה בטוחה."""
-    for key, value in loaded_data.items():
-        if is_json_serializable(value):
-            st.session_state[key] = value
-        elif isinstance(value, pd.DataFrame):
-            st.session_state[key] = value.to_json()
-        else:
-            st.session_state[key] = str(value)
+import json
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
+
+# =========================
+# פונקציות המרה ל/מ Firestore
+# =========================
+def serialize_for_firestore(value):
+    """המרה לאובייקט שניתן לשמור ב־Firestore וב־session_state"""
+    # טיפוסי פנדס
+    if isinstance(value, pd.DataFrame):
+        return {"__type__": "DataFrame", "data": value.to_dict(orient='split')}
+    elif isinstance(value, pd.Series):
+        return {"__type__": "Series", "data": value.to_dict()}
+    elif isinstance(value, pd.Timestamp):
+        return {"__type__": "Timestamp", "data": value.isoformat()}
+    elif isinstance(value, bytes):
+        return {"__type__": "Bytes", "data": base64.b64encode(value).decode('utf-8')}
+    # טיפוסים פשוטים
+    elif isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    # רשימות ומילונים - נוודא שהם עצמם ניתנים לסיריאליזציה
+    elif isinstance(value, list):
+        return [serialize_for_firestore(v) for v in value]
+    elif isinstance(value, dict):
+        return {k: serialize_for_firestore(v) for k, v in value.items()}
+    else:
+        # טיפוס לא מוכר - נשמור כמחרוזת
+        return {"__type__": "str", "data": str(value)}
+
+
+def deserialize_from_firestore(value):
+    """שחזור הערך לסוג המקורי לאחר טעינה"""
+    if isinstance(value, dict) and "__type__" in value:
+        t = value["__type__"]
+        if t == "DataFrame":
+            # value['data'] הוא dict של orient='split'
+            return pd.DataFrame(**value["data"])
+        elif t == "Series":
+            return pd.Series(value["data"])
+        elif t == "Timestamp":
+            return pd.Timestamp(value["data"])
+        elif t == "Bytes":
+            return base64.b64decode(value["data"])
+        elif t == "str":
+            return value["data"]
+    # אם זה רשימה או מילון של ערכים שסיריאלזו
+    if isinstance(value, list):
+        return [deserialize_from_firestore(v) for v in value]
+    if isinstance(value, dict):
+        # אין __type__ אבל זה מילון - ננסה לשחזר כל ערך בו
+        return {k: deserialize_from_firestore(v) for k, v in value.items()}
+    return value
+
+
+def safe_set_session_state_from_loaded_data(loaded_data):
+    """טעינה בטוחה של הנתונים ל־session_state"""
+    for key, value in loaded_data.items():
+        try:
+            st.session_state[key] = deserialize_from_firestore(value)
+        except Exception as e:
+            # אם לא ניתן לשחזר, נשמור את הייצוג המקורי
+            st.session_state[key] = value
 
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
@@ -105,17 +128,22 @@ def init_connection():
 
 db = init_connection()
 
-# --- Save/Load ---
+# --- Save/Load (עכשיו עם סריאליזציה) ---
 def save_scenario(user_id, scenario_name, data):
     if not db or not user_id or not scenario_name:
         st.sidebar.warning("User ID and Scenario Name are required to save.")
         return
     try:
-        data_to_save = {k: v for k, v in data.items() if isinstance(k, str) and not k.startswith(('FormSubmitter', 'results', '_'))}
+        # בחר רק את המפתחות המתאימים ושמור בערכים שסיריאליזו
+        data_to_save = {}
+        for k, v in data.items():
+            if isinstance(k, str) and k not in ['results', 'load_scenario_select', 'scenario_name', 'new_product_name_input'] and not k.startswith(('FormSubmitter', '_')):
+                data_to_save[k] = serialize_for_firestore(v)
         db.collection('users').document(user_id).collection('scenarios').document(scenario_name).set(data_to_save)
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
     except Exception as e:
         st.sidebar.error(f"Error saving scenario: {e}")
+
 
 def get_user_scenarios(user_id):
     if not db or not user_id:
@@ -123,8 +151,10 @@ def get_user_scenarios(user_id):
     try:
         docs = db.collection('users').document(user_id).collection('scenarios').stream()
         return [""] + [doc.id for doc in docs]
-    except:
+    except Exception as e:
+        st.sidebar.error(f"Error fetching scenarios: {e}")
         return [""]
+
 
 def load_scenario_data(user_id, scenario_name):
     if not db or not user_id or not scenario_name:
@@ -219,6 +249,7 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "error": None
     }
 
+
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
     quarters_index = acquired_customers_plan.index
     lead_plan = pd.DataFrame(0, index=quarters_index, columns=acquired_customers_plan.columns)
@@ -253,20 +284,19 @@ with st.sidebar:
                         if loaded_data:
                             st.session_state.results = {}
                             safe_set_session_state_from_loaded_data(loaded_data)
-                            st.rerun()
+                            st.experimental_rerun()
                 else:
                     st.caption("No scenarios found.")
             with col_save:
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
                 if st.button("Save Current") and scenario_name_to_save:
-                    all_inputs = {'user_id': st.session_state.user_id, 'products': st.session_state.products}
+                    # אסוף את כל המפתחות הרצויים מה-session_state
+                    all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
                     for key, value in st.session_state.items():
                         if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
                             if not key.startswith('FormSubmitter'):
                                 all_inputs[key] = value
-                    save_scenario(st.session_state.user_id, scenario_name_to_save, all_inputs)
-
-# ... כאן ממשיכים החלקים של ניהול מוצרים, קליטת פרמטרים, הרצה, הצגת טבלאות וגרפים ...
+                    save_scenario(st.session_state.get('user_id', user_id), scenario_name_to_save, all_inputs)
 
     with st.expander("Manage Products"):
         for i, product_name in enumerate(st.session_state.get('products', ["Product A", "Product B"])):
@@ -276,7 +306,7 @@ with st.sidebar:
         if st.button("Add Product") and new_product_name:
             if new_product_name not in st.session_state.products:
                 st.session_state.products.append(new_product_name)
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.warning("Product name already exists.")
 
