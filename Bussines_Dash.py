@@ -65,71 +65,74 @@ if 'results' not in st.session_state:
 # --- Excel Export ---
 @st.cache_data
 def to_excel(results_dict):
-    # =======================================================
-    #               *** START OF NEW FIX ***
-    #  בדיקה בתחילת הפונקציה למניעת קריסה
-    # =======================================================
-    if not results_dict or all(key == 'summary' for key in results_dict):
-        # אם המילון ריק, או מכיל רק סיכום (כלומר אין מוצרים), אל תנסה לייצר קובץ
-        return None # החזרת ערך ריק תמנע את השגיאה
-    # =======================================================
-    #               *** END OF NEW FIX ***
-    # =======================================================
-
+    # --- START OF THE FINAL CORRECTED FUNCTION ---
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Loop for each product to create a dedicated sheet
         for product_name, data in results_dict.items():
             if product_name == 'summary':
                 continue
             
-            df_acquired_cust_T = data['acquired_customers_plan'].T
+            # --- Prepare all dataframes for the sheet ---
             df_lead_plan_T = data['lead_plan'].T
+            df_acquired_cust_T = data['acquired_customers_plan'].T
             df_cum_cust_q_T = data["cumulative_customers"].T
             df_validation = data['validation_df']
             df_tons_per_customer = data['tons_per_customer'].T
             df_pen_rate = (data['pen_rate_df'] * 100).T
 
-            for df in [df_acquired_cust_T, df_lead_plan_T, df_cum_cust_q_T]:
+            # Format all quarterly columns
+            for df in [df_lead_plan_T, df_acquired_cust_T, df_cum_cust_q_T]:
                 df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
 
-            current_row = 1
+            # --- Write tables to the sheet one by one with correct ordering ---
+            # 1. Write the dataframe first (this creates the sheet)
+            # 2. Then write the title cell above it.
+
+            # Table 0
+            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=2)
+            writer.sheets[product_name].cell(row=1, column=1, value="Recommended Lead Contact Plan (Table 0)")
             
-            # Write all tables sequentially
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Recommended Lead Contact Plan (Table 0)")
-            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-            current_row += df_lead_plan_T.shape[0] + 4
+            # Table 1
+            startrow_1 = df_lead_plan_T.shape[0] + 6
+            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=startrow_1)
+            writer.sheets[product_name].cell(row=startrow_1 - 1, column=1, value="Acquired New Customers per Quarter (Table 1)")
 
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Acquired New Customers per Quarter (Table 1)")
-            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-            current_row += df_acquired_cust_T.shape[0] + 4
+            # Table 2
+            startrow_2 = startrow_1 + df_acquired_cust_T.shape[0] + 4
+            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=startrow_2)
+            writer.sheets[product_name].cell(row=startrow_2 - 1, column=1, value="Cumulative Customers (Quarterly) (Table 2)")
 
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Cumulative Customers (Quarterly) (Table 2)")
-            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-            current_row += df_cum_cust_q_T.shape[0] + 4
+            # Table 3
+            startrow_3 = startrow_2 + df_cum_cust_q_T.shape[0] + 4
+            df_validation.to_excel(writer, sheet_name=product_name, startrow=startrow_3)
+            writer.sheets[product_name].cell(row=startrow_3 - 1, column=1, value="Target vs. Actual Revenue (Table 3)")
 
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Target vs. Actual Revenue (Table 3)")
-            df_validation.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-            current_row += df_validation.shape[0] + 4
+            # Table 4
+            startrow_4 = startrow_3 + df_validation.shape[0] + 4
+            df_tons_per_customer.to_excel(writer, sheet_name=product_name, startrow=startrow_4)
+            writer.sheets[product_name].cell(row=startrow_4 - 1, column=1, value="Annual Tons per Single Customer (Target-Driven) (Table 4)")
 
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Annual Tons per Single Customer (Target-Driven) (Table 4)")
-            df_tons_per_customer.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-            current_row += df_tons_per_customer.shape[0] + 4
+            # Table 5
+            startrow_5 = startrow_4 + df_tons_per_customer.shape[0] + 4
+            df_pen_rate.to_excel(writer, sheet_name=product_name, startrow=startrow_5)
+            writer.sheets[product_name].cell(row=startrow_5 - 1, column=1, value="Generated Penetration Rates to Meet Target (%) (Table 5)")
 
-            writer.sheets[product_name].cell(row=current_row, column=1, value="Generated Penetration Rates to Meet Target (%) (Table 5)")
-            df_pen_rate.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
-
-        if "summary" in results_dict and results_dict["summary"]["summary_revenue"] is not None:
+        # --- Overall Summary Sheet ---
+        if "summary" in results_dict:
             summary_data = results_dict["summary"]
-            summary_revenue_df = summary_data["summary_revenue"]
-            summary_customers_df = summary_data["summary_customers_raw"]
-            summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2)
-            writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
-            summary_customers_df_T = summary_customers_df.to_frame("Total Customers").T
-            summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
-            summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10)
-            writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
+            if summary_data and summary_data.get("summary_revenue") is not None:
+                summary_revenue_df = summary_data["summary_revenue"]
+                summary_customers_df = summary_data["summary_customers_raw"]
+                summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2)
+                writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
+                summary_customers_df_T = summary_customers_df.to_frame("Total Customers").T
+                summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
+                summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10)
+                writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
             
     return output.getvalue()
+    # --- END OF THE FINAL CORRECTED FUNCTION ---
 # --- Firebase ---
 @st.cache_resource
 def init_connection():
