@@ -7,27 +7,40 @@ from scipy.interpolate import PchipInterpolator
 import io
 from google.oauth2 import service_account
 from google.cloud import firestore
-
 import base64
-import pandas as pd
 
-def clean_value_for_session_state(value):
-    if isinstance(value, (str, int, float, bool, type(None), list, dict)):
+
+def deep_clean_value(value):
+    # בסיס - טיפוסים פשוטים
+    if isinstance(value, (str, int, float, bool, type(None))):
         return value
+    # DataFrame 
     elif isinstance(value, pd.DataFrame):
-        # המרה למילון עם orient='split' לשחזור נוח
         return value.to_dict(orient='split')
+    # Series
+    elif isinstance(value, pd.Series):
+        return value.to_dict()
+    # Timestamp
     elif isinstance(value, pd.Timestamp):
         return value.isoformat()
+    # numpy ndarray
+    elif isinstance(value, np.ndarray):
+        return value.tolist()
+    # bytes
     elif isinstance(value, bytes):
-        # המרה למחרוזת base64
         return base64.b64encode(value).decode('utf-8')
+    # list
+    elif isinstance(value, list):
+        return [deep_clean_value(v) for v in value]
+    # dict
+    elif isinstance(value, dict):
+        return {k: deep_clean_value(v) for k, v in value.items()}
     else:
         return str(value)
-
+        
 def safe_set_session_state_from_loaded_data(loaded_data):
     for key, value in loaded_data.items():
-        cleaned_value = clean_value_for_session_state(value)
+        cleaned_value = deep_clean_value(value)
         st.session_state[key] = cleaned_value
 
 # === פונקציות עזר לטעינה בטוחה ל-session_state === #
