@@ -254,34 +254,44 @@ with st.sidebar:
         if user_id and db:
             saved_scenarios = get_user_scenarios(user_id)
             col_load, col_save = st.columns(2)
+            
             with col_load:
+                # הכל מתחיל מהבדיקה אם בכלל יש תרחישים שמורים
                 if len(saved_scenarios) > 1:
                     selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
-                    
-                    # =======================================================
-                    #               *** START OF FIX ***
-                    # =======================================================
+
+                    # כפתור הטעינה והלוגיקה שלו צריכים להיות בתוך התנאי שלמעלה
                     if st.button("Load") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
+                        
+                        # רק אם הטעינה מהמסד נתונים הצליחה, נמשיך
                         if loaded_data:
-                            # 1. Clear previous results to avoid conflicts
+                            # 1. נקה תוצאות קודמות
                             st.session_state.results = {}
                             
-                            # 2. Deserialize every value before putting it into session_state
+                            # 2. טען את הנתונים תוך כדי דילוג על המפתח הבעייתי
                             for key, value in loaded_data.items():
-                                st.session_state[key] = deserialize_from_firestore(value)
+                                if key == 'user_id':
+                                    continue  # דלג על מפתח זה
+
+                                try:
+                                    st.session_state[key] = deserialize_from_firestore(value)
+                                except Exception as e:
+                                    st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
+                                    raise e
                             
-                            # 3. Rerun the app to reflect the loaded state in the UI
+                            # 3. הרץ מחדש רק אחרי שהכל נטען בהצלחה
+                            st.sidebar.success("Scenario loaded successfully!")
                             st.rerun()
-                    # =======================================================
-                    #                *** END OF FIX ***
-                    # =======================================================
-                            
+                
+                # ה-else הזה מתייחס לבדיקה אם יש תרחישים שמורים
                 else:
                     st.caption("No scenarios found.")
+            
             with col_save:
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
                 if st.button("Save Current") and scenario_name_to_save:
+                    # אסוף את כל המפתחות הרצויים מה-session_state
                     all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
                     for key, value in st.session_state.items():
                         if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
