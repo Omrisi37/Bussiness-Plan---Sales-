@@ -284,39 +284,137 @@ with st.sidebar:
             lead_params['time_aheads_in_quarters'][c_type] = st.slider(f'Time Ahead (Quarters) - {c_type}', 1, 12, st.session_state.get(ta_key, ta_defaults[c_type]), key=ta_key)
     
     product_inputs = {}
-    for product in st.session_state.products:
-        st.header(product)
-        product_inputs[product] = {}
-        with st.expander(f"1. Initial Customer Value", expanded=False):
-            product_inputs[product]['is_m'] = st.number_input('Initial Tons/Customer - Medium:', 0.0, value=st.session_state.get(f'is_m_{product}', 1.5), step=0.1, key=f'is_m_{product}')
-            product_inputs[product]['is_l'] = st.number_input('Initial Tons/Customer - Large:', 0.0, value=st.session_state.get(f'is_l_{product}', 10.0), step=1.0, key=f'is_l_{product}')
-            product_inputs[product]['is_g'] = st.number_input('Initial Tons/Customer - Global:', 0.0, value=st.session_state.get(f'is_g_{product}', 40.0), step=2.0, key=f'is_g_{product}')
-        with st.expander(f"2. Customer Value Growth", expanded=False):
-            product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, st.session_state.get(f'mgr_{product}', 6.4), 0.1, key=f'mgr_{product}')
-            product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, st.session_state.get(f'pen_y1_{product}', 7.5), 0.1, key=f'pen_y1_{product}')
-            product_inputs[product]['tt_m'] = st.number_input('Target Tons/Cust Year 5 - Medium:', 0.0, value=st.session_state.get(f'tt_m_{product}', 89.0), key=f'tt_m_{product}')
-            product_inputs[product]['tt_l'] = st.number_input('Target Tons/Cust Year 5 - Large:', 0.0, value=st.session_state.get(f'tt_l_{product}', 223.0), key=f'tt_l_{product}')
-            product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=st.session_state.get(f'tt_g_{product}', 536.0), key=f'tt_g_{product}')
-        with st.expander(f"3. Revenue Targets & Sales Strategy", expanded=False):
-            st.markdown("**Target Annual Revenue ($)**")
-            default_revenues = [300000, 2700000, 5500000, 12000000, 32000000, 40000000]
-            rev_targets = []
-            for i in range(6):
-                year_num = i + 1
-                key = f'rev_y{year_num}_{product}'
-                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, st.session_state.get(key, default_revenues[i]), 100000, format="$%d", key=key)
-                rev_targets.append(rev_slider_val)
-            product_inputs[product]['annual_rev_targets'] = rev_targets
-            st.markdown("---")
-            st.markdown("**Sales Focus (%)**")
-            product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, st.session_state.get(f'f_m_{product}', 50), 5, key=f'f_m_{product}')
-            product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, st.session_state.get(f'f_l_{product}', 30), 5, key=f'f_l_{product}')
-            product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, st.session_state.get(f'f_g_{product}', 20), 5, key=f'f_g_{product}')
-        with st.expander(f"4. Pricing Assumptions", expanded=False):
-            product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=st.session_state.get(f'ip_kg_{product}', 18.0), step=0.5, key=f'ip_kg_{product}')
-            product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, st.session_state.get(f'pdr_{product}', 3.65), 0.05, key=f'pdr_{product}')
-            product_inputs[product]['price_floor'] = st.number_input('Minimum Price ($):', 0.0, value=st.session_state.get(f'price_floor_{product}', 14.0), step=0.5, key=f'price_floor_{product}')
-    
+
+for i, product_name in enumerate(st.session_state.products):
+    st.header(product_name)
+    product_inputs[product_name] = {}
+
+    with st.expander(f"1. Initial Customer Value", expanded=False):
+        product_inputs[product_name]['is_m'] = st.number_input(
+            f'Initial Tons/Customer - Medium ({product_name}):',
+            min_value=0.0,
+            value=st.session_state.get(f'is_m_{i}', 1.5),
+            step=0.1,
+            key=f'is_m_{i}'
+        )
+
+        product_inputs[product_name]['is_l'] = st.number_input(
+            f'Initial Tons/Customer - Large ({product_name}):',
+            min_value=0.0,
+            value=st.session_state.get(f'is_l_{i}', 10.0),
+            step=1.0,
+            key=f'is_l_{i}'
+        )
+
+        product_inputs[product_name]['is_g'] = st.number_input(
+            f'Initial Tons/Customer - Global ({product_name}):',
+            min_value=0.0,
+            value=st.session_state.get(f'is_g_{i}', 40.0),
+            step=2.0,
+            key=f'is_g_{i}'
+        )
+
+    with st.expander(f"2. Customer Value Growth", expanded=False):
+        product_inputs[product_name]['market_gr'] = st.slider(
+            f'Annual Market Growth Rate (%) ({product_name})',
+            min_value=0.0, max_value=20.0,
+            value=st.session_state.get(f'mgr_{i}', 6.4),
+            step=0.1, key=f'mgr_{i}'
+        )
+        product_inputs[product_name]['pen_y1'] = st.slider(
+            f'Penetration Rate Year 1 (%) ({product_name})',
+            min_value=1.0, max_value=20.0,
+            value=st.session_state.get(f'pen_y1_{i}', 7.5),
+            step=0.1, key=f'pen_y1_{i}'
+        )
+        product_inputs[product_name]['tt_m'] = st.number_input(
+            f'Target Tons/Cust Year 5 - Medium ({product_name})',
+            min_value=0.0,
+            value=st.session_state.get(f'tt_m_{i}', 89.0),
+            key=f'tt_m_{i}'
+        )
+        product_inputs[product_name]['tt_l'] = st.number_input(
+            f'Target Tons/Cust Year 5 - Large ({product_name})',
+            min_value=0.0,
+            value=st.session_state.get(f'tt_l_{i}', 223.0),
+            key=f'tt_l_{i}'
+        )
+        product_inputs[product_name]['tt_g'] = st.number_input(
+            f'Target Tons/Cust Year 5 - Global ({product_name})',
+            min_value=0.0,
+            value=st.session_state.get(f'tt_g_{i}', 536.0),
+            key=f'tt_g_{i}'
+        )
+
+    with st.expander(f"3. Revenue Targets & Sales Strategy", expanded=False):
+        st.markdown("**Target Annual Revenue ($)**")
+        default_revenues = [300000, 2700000, 5500000, 12000000, 32000000, 40000000]
+        rev_targets = []
+        for year_num in range(6):
+            key = f'rev_y{year_num+1}_{i}'
+            rev_slider_val = st.slider(
+                f'Year {year_num+1} ({product_name}):',
+                min_value=0,
+                max_value=50_000_000,
+                value=st.session_state.get(key, default_revenues[year_num]),
+                step=100000,
+                format="$%d",
+                key=key
+            )
+            rev_targets.append(rev_slider_val)
+        product_inputs[product_name]['annual_rev_targets'] = rev_targets
+
+        st.markdown("---")
+        st.markdown("**Sales Focus (%)**")
+        product_inputs[product_name]['f_m'] = st.slider(
+            f'Medium ({product_name})',
+            min_value=0,
+            max_value=100,
+            value=st.session_state.get(f'f_m_{i}', 50),
+            step=5,
+            key=f'f_m_{i}'
+        )
+        product_inputs[product_name]['f_l'] = st.slider(
+            f'Large ({product_name})',
+            min_value=0,
+            max_value=100,
+            value=st.session_state.get(f'f_l_{i}', 30),
+            step=5,
+            key=f'f_l_{i}'
+        )
+        product_inputs[product_name]['f_g'] = st.slider(
+            f'Global ({product_name})',
+            min_value=0,
+            max_value=100,
+            value=st.session_state.get(f'f_g_{i}', 20),
+            step=5,
+            key=f'f_g_{i}'
+        )
+
+    with st.expander(f"4. Pricing Assumptions", expanded=False):
+        product_inputs[product_name]['ip_kg'] = st.number_input(
+            f'Initial Price per Kg ($) ({product_name})',
+            min_value=0.0,
+            value=st.session_state.get(f'ip_kg_{i}', 18.0),
+            step=0.5,
+            key=f'ip_kg_{i}'
+        )
+        product_inputs[product_name]['pdr'] = st.slider(
+            f'Quarterly Price Decay (%) ({product_name})',
+            min_value=0.0,
+            max_value=10.0,
+            value=st.session_state.get(f'pdr_{i}', 3.65),
+            step=0.05,
+            key=f'pdr_{i}'
+        )
+        product_inputs[product_name]['price_floor'] = st.number_input(
+            f'Minimum Price ($) ({product_name})',
+            min_value=0.0,
+            value=st.session_state.get(f'price_floor_{i}', 14.0),
+            step=0.5,
+            key=f'price_floor_{i}'
+        )
+
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
 
 # --- App Logic and Display ---
