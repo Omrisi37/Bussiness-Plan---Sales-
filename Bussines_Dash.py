@@ -502,42 +502,63 @@ if st.session_state.results:
 
     for i, product_name in enumerate(product_list):
         with tabs[i]:
-            # ... (כל קוד התצוגה של הטאבים, כפי שהיה) ...
             st.header(f"Results for {product_name}")
             leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
             acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
             cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
+            
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
             lead_plan_display_T = leads_to_display.T
             lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
             st.dataframe(lead_plan_display_T.style.format("{:d}"))
+            
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
-            fig0 = create_yearly_bar_chart(df_quarterly=leads_to_display, title=f"Leads to Contact per Year - {product_name}", y_axis_label="Number of Leads to Contact")
+            # =======================================================
+            #               *** START OF MODIFICATION ***
+            #  יצירת משתנה חדש ומסונן במיוחד עבור הגרף, כדי לא לשנות את הטבלה
+            # =======================================================
+            leads_for_chart0 = leads_to_display[leads_to_display.index.year != 2030]
+            
+            fig0 = create_yearly_bar_chart(
+                df_quarterly=leads_for_chart0, # שימוש במשתנה המסונן
+                title=f"Leads to Contact per Year - {product_name}", 
+                y_axis_label="Number of Leads to Contact"
+            )
+            # =======================================================
+            #               *** END OF MODIFICATION ***
+            # =======================================================
             st.pyplot(fig0)
             st.markdown("---")
+
             st.subheader("Action Plan & Outcomes")
             st.markdown("#### Table 1: Acquired New Customers per Quarter")
             acquired_customers_display_T = acquired_to_display.T
             acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
             st.dataframe(acquired_customers_display_T.style.format("{:d}"))
+            
             st.markdown("##### Chart 1: Yearly Acquired New Customers")
             fig1 = create_yearly_bar_chart(df_quarterly=acquired_to_display, title=f"Acquired New Customers per Year - {product_name}", y_axis_label="Number of New Customers")
             st.pyplot(fig1)
             st.markdown("---")
+
             st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
             cum_cust_display_T = cumulative_to_display.T
             cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
             st.dataframe(cum_cust_display_T.style.format("{:,d}"))
+
             st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
             fig2 = create_yearly_bar_chart(df_quarterly=cumulative_to_display, title=f"Cumulative Customers at Year End - {product_name}", y_axis_label="Total Number of Customers", is_cumulative=True)
             st.pyplot(fig2)
             st.markdown("---")
+            
             validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
+            
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
+            
             st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
             plot_df = validation_df.reset_index()
             plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
@@ -550,6 +571,7 @@ if st.session_state.results:
             for container in barplot.containers:
                 ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
             st.pyplot(fig)
+            
             with st.expander("View Underlying Assumptions"):
                 tons_per_customer_df = results[product_name].get('tons_per_customer')
                 pen_rate_df = results[product_name].get('pen_rate_df')
@@ -561,7 +583,6 @@ if st.session_state.results:
                     st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
 
     with tabs[-1]:
-        # ... (כל קוד התצוגה של טאב הסיכום, כפי שהיה) ...
         st.header("Overall Summary (All Products)")
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
@@ -588,7 +609,6 @@ if st.session_state.results:
         ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
-    
     # --- הכנת האקסל וכפתור ההורדה ---
     # כל הקוד הזה נמצא בתוך בלוק ה-if הראשי
     excel_results_to_pass = {}
