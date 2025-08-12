@@ -13,8 +13,11 @@ import base64
 # פונקציות עזר
 # ======================
 
-def deep_clean_value(value):
-    """ניקוי עמוק של ערכים לאחסון ב-session_state (רקורסיבי)"""
+def deep_clean_value(value, key=None):
+    import pandas as pd
+    import numpy as np
+    import base64
+
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     elif isinstance(value, pd.DataFrame):
@@ -28,17 +31,19 @@ def deep_clean_value(value):
     elif isinstance(value, bytes):
         return base64.b64encode(value).decode('utf-8')
     elif isinstance(value, list):
-        return [deep_clean_value(v) for v in value]
+        return [deep_clean_value(v, key=key) for v in value]
     elif isinstance(value, dict):
-        return {k: deep_clean_value(v) for k, v in value.items()}
+        return {k: deep_clean_value(v, key=k) for k, v in value.items()}
     else:
+        print(f"Warning: Unexpected type for key {key}: {type(value)}")
         return str(value)
 
 def safe_set_session_state_from_loaded_data(loaded_data):
-    """עדכון session_state עם ערכים מנוקים"""
     for key, value in loaded_data.items():
-        cleaned_value = deep_clean_value(value)
+        print(f"Loading key: {key}, type: {type(value)}")  # לוג ראשוני
+        cleaned_value = deep_clean_value(value, key=key)
         st.session_state[key] = cleaned_value
+
 
 def delete_scenario(user_id, scenario_name):
     """מחיקת תרחיש מ-Firestore"""
