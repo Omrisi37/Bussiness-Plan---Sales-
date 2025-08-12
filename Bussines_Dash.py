@@ -261,71 +261,78 @@ st.title("Dynamic Multi-Product Business Plan Dashboard")
 with st.sidebar:
     st.title("Business Plan Controls")
     with st.expander("User & Scenarios", expanded=True):
-        user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
-        if user_id and db:
-            saved_scenarios = get_user_scenarios(user_id)
-            col_load, col_save = st.columns(2)
+    user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
+    if user_id and db:
+        saved_scenarios = get_user_scenarios(user_id)
+        col_load, col_save = st.columns(2)
 
-            with col_load:
-                st.subheader("Load or Delete")
-                if len(saved_scenarios) > 1:
-                    selected_scenario = st.selectbox(
-                        "Select scenario",
-                        options=saved_scenarios, 
-                        index=0, 
-                        key="load_scenario_select",
-                        label_visibility="collapsed"
-                    )
+        # --- עמודה שמאלית: טעינה ומחיקה ---
+        with col_load:
+            st.subheader("Load or Delete")
+            if len(saved_scenarios) > 1:
+                selected_scenario = st.selectbox(
+                    "Select scenario",
+                    options=saved_scenarios, 
+                    index=0, 
+                    key="load_scenario_select",
+                    label_visibility="collapsed"
+                )
 
-                    # --- לוגיקת טעינה ---
-                    if st.button("Load Scenario") and selected_scenario:
-                        loaded_data = load_scenario_data(user_id, selected_scenario)
-                        if loaded_data:
-                            st.session_state.results = {}
-                            for key, value in loaded_data.items():
-                                if key == 'user_id':
-                                    continue
-                                try:
-                                    st.session_state[key] = deserialize_from_firestore(value)
-                                except Exception as e:
-                                    st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
-                                    raise e
-                            st.sidebar.success("Scenario loaded!")
-                            st.rerun()
+                # לוגיקת טעינה
+                if st.button("Load Scenario") and selected_scenario:
+                    loaded_data = load_scenario_data(user_id, selected_scenario)
+                    if loaded_data:
+                        st.session_state.results = {}
+                        for key, value in loaded_data.items():
+                            if key == 'user_id':
+                                continue
+                            try:
+                                st.session_state[key] = deserialize_from_firestore(value)
+                            except Exception as e:
+                                st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
+                                raise e
+                        st.sidebar.success("Scenario loaded!")
+                        st.rerun()
 
-                    # --- לוגיקת מחיקה ---
-                    st.markdown("---") # קו מפריד ויזואלי
-                    
-                    if selected_scenario: # רק אם יש תרחיש בחור, נציג את אופציית המחיקה
-                        confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
-                        
-                        # כפתור מחיקה, יהיה אדום בזכות type="primary"
-                        if st.button("Delete Scenario", type="primary"):
-                            if confirm_delete:
-                                if delete_scenario(user_id, selected_scenario):
-                                    st.session_state.confirm_delete_checkbox = False # איפוס תיבת הסימון
-                                    st.rerun() # רענון הרשימה
-                            else:
-                                st.warning("Please check the box to confirm.")
-                else:
-                    st.caption("No scenarios found to load or delete.")
-            
-            with col_save:
-                st.subheader("Save New")
-                scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
+                st.markdown("---") # קו מפריד ויזואלי
                 
-                if st.button("Save Current") and scenario_name_to_save:
-                    # ודא ששם התרחיש לא ריק
-                    if scenario_name_to_save in saved_scenarios:
-                        st.error(f"Scenario '{scenario_name_to_save}' already exists. Choose a different name.")
-                    else:
-                        all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
-                        keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox', 'FormSubmitter:save_scenario_form-Save Scenario']
-                        for key, value in st.session_state.items():
-                            if isinstance(key, str) and key not in keys_to_exclude and not key.startswith('_'):
-                                all_inputs[key] = value
-                        
-                        save_scenario(user_id, scenario_name_to_save, all_inputs)
+                # לוגיקת מחיקה (כולל התיקון האחרון)
+                if selected_scenario:
+                    confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
+                    
+                    if st.button("Delete Scenario", type="primary"):
+                        if confirm_delete:
+                            if delete_scenario(user_id, selected_scenario):
+                                # איפוס המסך הראשי למצב ברירת מחדל
+                                st.session_state.results = {} 
+                                # איפוס תיבת הסימון
+                                st.session_state.confirm_delete_checkbox = False 
+                                # רענון רשימת התרחישים
+                                st.rerun() 
+                        else:
+                            st.warning("Please check the box to confirm.")
+            else:
+                st.caption("No scenarios found to load or delete.")
+        
+        # --- עמודה ימנית: שמירה ---
+        with col_save:
+            st.subheader("Save New")
+            scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
+            
+            if st.button("Save Current") and scenario_name_to_save:
+                if scenario_name_to_save in saved_scenarios:
+                    st.error(f"Scenario '{scenario_name_to_save}' already exists.")
+                else:
+                    all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
+                    keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox']
+                    
+                    for key, value in st.session_state.items():
+                        is_excluded = key in keys_to_exclude or key.startswith(('FormSubmitter', '_'))
+                        if isinstance(key, str) and not is_excluded:
+                            all_inputs[key] = value
+                    
+                    save_scenario(user_id, scenario_name_to_save, all_inputs)
+                    st.rerun()
                         st.rerun()
     with st.expander("Manage Products"):
         # Use a copy to iterate while allowing modification
