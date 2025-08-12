@@ -211,34 +211,51 @@ st.title("🚀 Dynamic Multi-Product Business Plan Dashboard")
 with st.sidebar:
     st.title("Business Plan Controls")
     with st.expander("User & Scenarios", expanded=True):
-        user_id = st.text_input("Enter your User ID", key="user_id")
+        # שדה קלט למשתמש
+        user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
+
         if user_id and db:
             saved_scenarios = get_user_scenarios(user_id)
-            if len(saved_scenarios) > 1:
-                st.markdown("#### Saved Scenarios")
-                for sname in saved_scenarios[1:]:
-                    cols = st.columns([5,1])
-                    if cols[0].button(f"Load '{sname}'", key=f"load_{sname}"):
-                        loaded_data = load_scenario_data(user_id, sname)
-                        if loaded_data:
-                            st.session_state.results = {}
-                            safe_set_session_state_from_loaded_data(loaded_data)
-                            st.rerun()
-                    if cols[1].button("❌", key=f"del_{sname}"):
-                        delete_scenario(user_id, sname)
-                        st.rerun()
-            else:
-                st.caption("No scenarios found.")
 
-            scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
-            if st.button("Save Current") and scenario_name_to_save:
-                all_inputs = {'user_id': user_id, 'products': st.session_state.products}
-                for key, value in st.session_state.items():
-                    if isinstance(key, str) and key not in ['results', 'user_id', 'products',
-                                                            'load_scenario_select', 'scenario_name', 'new_product_name_input']:
-                        if not key.startswith('FormSubmitter'):
-                            all_inputs[key] = value
-                save_scenario(user_id, scenario_name_to_save, all_inputs)
+            col_load, col_save = st.columns(2)
+            with col_load:
+                if len(saved_scenarios) > 1:
+                    st.markdown("#### Saved Scenarios")
+                    for sname in saved_scenarios[1:]:  # דילוג על האופציה הריקה
+                        cols = st.columns([5,1])
+                        # כפתור טעינה
+                        if cols[0].button(f"Load '{sname}'", key=f"load_{sname}"):
+                            loaded_data = load_scenario_data(user_id, sname)
+                            if loaded_data:
+                                st.session_state.results = {}
+                                # אל תעדכן user_id מתוך הקובץ הטעון
+                                if 'user_id' in loaded_data:
+                                    del loaded_data['user_id']
+                                safe_set_session_state_from_loaded_data(loaded_data)
+                                st.rerun()
+                        # כפתור מחיקה
+                        if cols[1].button("❌", key=f"del_{sname}"):
+                            delete_scenario(user_id, sname)
+                            st.rerun()
+                else:
+                    st.caption("No scenarios found.")
+
+            with col_save:
+                scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
+                if st.button("Save Current") and scenario_name_to_save:
+                    all_inputs = {
+                        'user_id': st.session_state.user_id,
+                        'products': st.session_state.products
+                    }
+                    for key, value in st.session_state.items():
+                        if isinstance(key, str) and key not in [
+                            'results', 'user_id', 'products',
+                            'load_scenario_select', 'scenario_name', 'new_product_name_input'
+                        ]:
+                            if not key.startswith('FormSubmitter'):
+                                all_inputs[key] = value
+                    save_scenario(st.session_state.user_id, scenario_name_to_save, all_inputs)
+
 
 # ... מכאן ממשיכים את חלק ניהול המוצרים, הכנסת פרמטרים, הרצה והצגת התוצאות שלך בדיוק כמו בקוד שלך ...
 
