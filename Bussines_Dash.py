@@ -133,7 +133,18 @@ def get_user_scenarios(user_id):
     except Exception as e:
         st.sidebar.error(f"Error fetching scenarios: {e}")
         return [""]
-
+def delete_scenario(user_id, scenario_name):
+    """Deletes a specific scenario for a user from Firestore."""
+    if not db or not user_id or not scenario_name:
+        st.sidebar.warning("Could not delete scenario. User ID or scenario name is missing.")
+        return False
+    try:
+        db.collection('users').document(user_id).collection('scenarios').document(scenario_name).delete()
+        st.sidebar.success(f"Scenario '{scenario_name}' deleted successfully.")
+        return True
+    except Exception as e:
+        st.sidebar.error(f"Error deleting scenario: {e}")
+        return False
 def load_scenario_data(user_id, scenario_name):
     if not db or not user_id or not scenario_name:
         return None
@@ -254,51 +265,68 @@ with st.sidebar:
         if user_id and db:
             saved_scenarios = get_user_scenarios(user_id)
             col_load, col_save = st.columns(2)
-            
-            with col_load:
-                # הכל מתחיל מהבדיקה אם בכלל יש תרחישים שמורים
-                if len(saved_scenarios) > 1:
-                    selected_scenario = st.selectbox("Load Scenario", options=saved_scenarios, index=0, key="load_scenario_select")
 
-                    # כפתור הטעינה והלוגיקה שלו צריכים להיות בתוך התנאי שלמעלה
-                    if st.button("Load") and selected_scenario:
+            with col_load:
+                st.subheader("Load or Delete")
+                if len(saved_scenarios) > 1:
+                    selected_scenario = st.selectbox(
+                        "Select scenario",
+                        options=saved_scenarios, 
+                        index=0, 
+                        key="load_scenario_select",
+                        label_visibility="collapsed"
+                    )
+
+                    # --- לוגיקת טעינה ---
+                    if st.button("Load Scenario") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
-                        
-                        # רק אם הטעינה מהמסד נתונים הצליחה, נמשיך
                         if loaded_data:
-                            # 1. נקה תוצאות קודמות
                             st.session_state.results = {}
-                            
-                            # 2. טען את הנתונים תוך כדי דילוג על המפתח הבעייתי
                             for key, value in loaded_data.items():
                                 if key == 'user_id':
-                                    continue  # דלג על מפתח זה
-
+                                    continue
                                 try:
                                     st.session_state[key] = deserialize_from_firestore(value)
                                 except Exception as e:
                                     st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
                                     raise e
-                            
-                            # 3. הרץ מחדש רק אחרי שהכל נטען בהצלחה
-                            st.sidebar.success("Scenario loaded successfully!")
+                            st.sidebar.success("Scenario loaded!")
                             st.rerun()
-                
-                # ה-else הזה מתייחס לבדיקה אם יש תרחישים שמורים
+
+                    # --- לוגיקת מחיקה ---
+                    st.markdown("---") # קו מפריד ויזואלי
+                    
+                    if selected_scenario: # רק אם יש תרחיש בחור, נציג את אופציית המחיקה
+                        confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
+                        
+                        # כפתור מחיקה, יהיה אדום בזכות type="primary"
+                        if st.button("Delete Scenario", type="primary"):
+                            if confirm_delete:
+                                if delete_scenario(user_id, selected_scenario):
+                                    st.session_state.confirm_delete_checkbox = False # איפוס תיבת הסימון
+                                    st.rerun() # רענון הרשימה
+                            else:
+                                st.warning("Please check the box to confirm.")
                 else:
-                    st.caption("No scenarios found.")
+                    st.caption("No scenarios found to load or delete.")
             
             with col_save:
+                st.subheader("Save New")
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
+                
                 if st.button("Save Current") and scenario_name_to_save:
-                    # אסוף את כל המפתחות הרצויים מה-session_state
-                    all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
-                    for key, value in st.session_state.items():
-                        if isinstance(key, str) and key not in ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input']:
-                            if not key.startswith('FormSubmitter'):
+                    # ודא ששם התרחיש לא ריק
+                    if scenario_name_to_save in saved_scenarios:
+                        st.error(f"Scenario '{scenario_name_to_save}' already exists. Choose a different name.")
+                    else:
+                        all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
+                        keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox', 'FormSubmitter:save_scenario_form-Save Scenario']
+                        for key, value in st.session_state.items():
+                            if isinstance(key, str) and key not in keys_to_exclude and not key.startswith('_'):
                                 all_inputs[key] = value
-                    save_scenario(st.session_state.get('user_id', user_id), scenario_name_to_save, all_inputs)
-
+                        
+                        save_scenario(user_id, scenario_name_to_save, all_inputs)
+                        st.rerun()
     with st.expander("Manage Products"):
         # Use a copy to iterate while allowing modification
         current_products = st.session_state.get('products', []).copy()
