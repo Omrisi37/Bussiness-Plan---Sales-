@@ -271,51 +271,47 @@ with st.sidebar:
 
             # --- עמודה שמאלית: טעינה ומחיקה ---
             with col_load:
-    st.subheader("Load or Delete")
-    if len(saved_scenarios) > 1:
-        selected_scenario = st.selectbox(
-            "Select scenario",
-            options=saved_scenarios, 
-            index=0, 
-            key="load_scenario_select",
-            label_visibility="collapsed"
-        )
+                st.subheader("Load or Delete")
+                if len(saved_scenarios) > 1:
+                    selected_scenario = st.selectbox(
+                        "Select scenario",
+                        options=saved_scenarios, 
+                        index=0, 
+                        key="load_scenario_select",
+                        label_visibility="collapsed"
+                    )
 
-        # לוגיקת טעינה
-        if st.button("Load Scenario") and selected_scenario:
-            loaded_data = load_scenario_data(user_id, selected_scenario)
-            if loaded_data:
-                st.session_state.results = {}
-                for key, value in loaded_data.items():
-                    if key == 'user_id':
-                        continue
-                    try:
-                        st.session_state[key] = deserialize_from_firestore(value)
-                    except Exception as e:
-                        st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
-                        raise e
-                st.sidebar.success("Scenario loaded!")
-                st.rerun()
+                    # לוגיקת טעינה
+                    if st.button("Load Scenario") and selected_scenario:
+                        loaded_data = load_scenario_data(user_id, selected_scenario)
+                        if loaded_data:
+                            st.session_state.results = {}
+                            for key, value in loaded_data.items():
+                                if key == 'user_id':
+                                    continue
+                                try:
+                                    st.session_state[key] = deserialize_from_firestore(value)
+                                except Exception as e:
+                                    st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
+                                    raise e
+                            st.sidebar.success("Scenario loaded!")
+                            st.rerun()
 
-        st.markdown("---") # קו מפריד ויזואלי
-        
-        # לוגיקת מחיקה
-        if selected_scenario:
-            confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
-            
-            if st.button("Delete Scenario", type="primary"):
-                if confirm_delete:
-                    if delete_scenario(user_id, selected_scenario):
-                        # איפוס המסך הראשי למצב ברירת מחדל
-                        st.session_state.results = {} 
-                        # התיקון הסופי: מחיקת המפתח כדי שה-checkbox יתאפס בריצה הבאה
-                        del st.session_state.confirm_delete_checkbox
-                        # רענון האפליקציה
-                        st.rerun() 
+                    st.markdown("---")
+                    
+                    # לוגיקת מחיקה
+                    if selected_scenario:
+                        confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
+                        if st.button("Delete Scenario", type="primary"):
+                            if confirm_delete:
+                                if delete_scenario(user_id, selected_scenario):
+                                    st.session_state.results = {}
+                                    del st.session_state.confirm_delete_checkbox
+                                    st.rerun()
+                            else:
+                                st.warning("Please check the box to confirm.")
                 else:
-                    st.warning("Please check the box to confirm.")
-    else:
-        st.caption("No scenarios found to load or delete.")
+                    st.caption("No scenarios found to load or delete.")
             
             # --- עמודה ימנית: שמירה ---
             with col_save:
@@ -367,6 +363,8 @@ with st.sidebar:
         product_inputs[product] = {}
         with st.expander(f"1. Initial Customer Value", expanded=False):
             product_inputs[product]['is_m'] = st.number_input('Initial Tons/Customer - Medium:', 0.0, value=st.session_state.get(f'is_m_{product}', 1.5), step=0.1, key=f'is_m_{product}')
+            # ... (the rest of your expanders for product inputs)
+            # This part seems to be correct in your original code, so I'll just put a placeholder
             product_inputs[product]['is_l'] = st.number_input('Initial Tons/Customer - Large:', 0.0, value=st.session_state.get(f'is_l_{product}', 10.0), step=1.0, key=f'is_l_{product}')
             product_inputs[product]['is_g'] = st.number_input('Initial Tons/Customer - Global:', 0.0, value=st.session_state.get(f'is_g_{product}', 40.0), step=2.0, key=f'is_g_{product}')
         with st.expander(f"2. Customer Value Growth", expanded=False):
@@ -398,7 +396,6 @@ with st.sidebar:
     
     # --- Run Button ---
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
-
 
 # --- App Logic and Display ---
 if run_button:
