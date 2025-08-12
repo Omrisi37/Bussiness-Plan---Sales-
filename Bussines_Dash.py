@@ -145,6 +145,7 @@ def delete_scenario(user_id, scenario_name):
     except Exception as e:
         st.sidebar.error(f"Error deleting scenario: {e}")
         return False
+
 def load_scenario_data(user_id, scenario_name):
     if not db or not user_id or not scenario_name:
         return None
@@ -260,85 +261,79 @@ st.title("Dynamic Multi-Product Business Plan Dashboard")
 
 with st.sidebar:
     st.title("Business Plan Controls")
+    
+    # --- Expander for User & Scenarios ---
     with st.expander("User & Scenarios", expanded=True):
-    user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
-    if user_id and db:
-        saved_scenarios = get_user_scenarios(user_id)
-        col_load, col_save = st.columns(2)
+        user_id = st.text_input("Enter your User ID (e.g., email)", key="user_id")
+        if user_id and db:
+            saved_scenarios = get_user_scenarios(user_id)
+            col_load, col_save = st.columns(2)
 
-        # --- עמודה שמאלית: טעינה ומחיקה ---
-        with col_load:
-            st.subheader("Load or Delete")
-            if len(saved_scenarios) > 1:
-                selected_scenario = st.selectbox(
-                    "Select scenario",
-                    options=saved_scenarios, 
-                    index=0, 
-                    key="load_scenario_select",
-                    label_visibility="collapsed"
-                )
+            # --- עמודה שמאלית: טעינה ומחיקה ---
+            with col_load:
+                st.subheader("Load or Delete")
+                if len(saved_scenarios) > 1:
+                    selected_scenario = st.selectbox(
+                        "Select scenario",
+                        options=saved_scenarios, 
+                        index=0, 
+                        key="load_scenario_select",
+                        label_visibility="collapsed"
+                    )
 
-                # לוגיקת טעינה
-                if st.button("Load Scenario") and selected_scenario:
-                    loaded_data = load_scenario_data(user_id, selected_scenario)
-                    if loaded_data:
-                        st.session_state.results = {}
-                        for key, value in loaded_data.items():
-                            if key == 'user_id':
-                                continue
-                            try:
-                                st.session_state[key] = deserialize_from_firestore(value)
-                            except Exception as e:
-                                st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
-                                raise e
-                        st.sidebar.success("Scenario loaded!")
-                        st.rerun()
+                    # לוגיקת טעינה
+                    if st.button("Load Scenario") and selected_scenario:
+                        loaded_data = load_scenario_data(user_id, selected_scenario)
+                        if loaded_data:
+                            st.session_state.results = {}
+                            for key, value in loaded_data.items():
+                                if key == 'user_id':
+                                    continue
+                                try:
+                                    st.session_state[key] = deserialize_from_firestore(value)
+                                except Exception as e:
+                                    st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
+                                    raise e
+                            st.sidebar.success("Scenario loaded!")
+                            st.rerun()
 
-                st.markdown("---") # קו מפריד ויזואלי
-                
-                # לוגיקת מחיקה (כולל התיקון האחרון)
-                if selected_scenario:
-                    confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
+                    st.markdown("---")
                     
-                    if st.button("Delete Scenario", type="primary"):
-                        if confirm_delete:
-                            if delete_scenario(user_id, selected_scenario):
-                                # איפוס המסך הראשי למצב ברירת מחדל
-                                st.session_state.results = {} 
-                                # איפוס תיבת הסימון
-                                st.session_state.confirm_delete_checkbox = False 
-                                # רענון רשימת התרחישים
-                                st.rerun() 
-                        else:
-                            st.warning("Please check the box to confirm.")
-            else:
-                st.caption("No scenarios found to load or delete.")
-        
-        # --- עמודה ימנית: שמירה ---
-        with col_save:
-            st.subheader("Save New")
-            scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
-            
-            if st.button("Save Current") and scenario_name_to_save:
-                if scenario_name_to_save in saved_scenarios:
-                    st.error(f"Scenario '{scenario_name_to_save}' already exists.")
+                    # לוגיקת מחיקה
+                    if selected_scenario:
+                        confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
+                        if st.button("Delete Scenario", type="primary"):
+                            if confirm_delete:
+                                if delete_scenario(user_id, selected_scenario):
+                                    st.session_state.results = {}
+                                    st.session_state.confirm_delete_checkbox = False
+                                    st.rerun()
+                            else:
+                                st.warning("Please check the box to confirm.")
                 else:
-                    all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
-                    keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox']
-                    
-                    for key, value in st.session_state.items():
-                        is_excluded = key in keys_to_exclude or key.startswith(('FormSubmitter', '_'))
-                        if isinstance(key, str) and not is_excluded:
-                            all_inputs[key] = value
-                    
-                    save_scenario(user_id, scenario_name_to_save, all_inputs)
-                    st.rerun()
+                    st.caption("No scenarios found to load or delete.")
+            
+            # --- עמודה ימנית: שמירה ---
+            with col_save:
+                st.subheader("Save New")
+                scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
+                if st.button("Save Current") and scenario_name_to_save:
+                    if scenario_name_to_save in saved_scenarios:
+                        st.error(f"Scenario '{scenario_name_to_save}' already exists.")
+                    else:
+                        all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
+                        keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox']
+                        for key, value in st.session_state.items():
+                            is_excluded = key in keys_to_exclude or key.startswith(('FormSubmitter', '_'))
+                            if isinstance(key, str) and not is_excluded:
+                                all_inputs[key] = value
+                        save_scenario(user_id, scenario_name_to_save, all_inputs)
                         st.rerun()
+
+    # --- Expander for Managing Products ---
     with st.expander("Manage Products"):
-        # Use a copy to iterate while allowing modification
         current_products = st.session_state.get('products', []).copy()
         for i, product_name in enumerate(current_products):
-            # Update the name in the original list
             st.session_state.products[i] = st.text_input(f"Product {i+1} Name", value=product_name, key=f"pname_{i}")
         
         new_product_name = st.text_input("New Product Name", key="new_product_name_input")
@@ -349,6 +344,7 @@ with st.sidebar:
             else:
                 st.warning("Product name already exists.")
 
+    # --- Expander for Lead Generation Parameters ---
     with st.expander("Lead Generation Parameters (Global)"):
         lead_params = { 'success_rates': {}, 'time_aheads_in_quarters': {} }
         customer_types_for_leads = ['Medium', 'Large', 'Global']
@@ -360,8 +356,8 @@ with st.sidebar:
             lead_params['success_rates'][c_type] = st.slider(f'Success Rate (%) - {c_type}', 0, 100, st.session_state.get(sr_key, sr_defaults[c_type]), key=sr_key)
             lead_params['time_aheads_in_quarters'][c_type] = st.slider(f'Time Ahead (Quarters) - {c_type}', 1, 12, st.session_state.get(ta_key, ta_defaults[c_type]), key=ta_key)
     
+    # --- Product-specific Inputs ---
     product_inputs = {}
-    # Iterate over a copy of the list to prevent issues if it's modified during the loop
     for product in st.session_state.get('products', []).copy():
         st.header(product)
         product_inputs[product] = {}
@@ -382,7 +378,6 @@ with st.sidebar:
             for i in range(6):
                 year_num = i + 1
                 key = f'rev_y{year_num}_{product}'
-                # Retrieve the value from session state, which is now correctly populated upon load
                 default_val = st.session_state.get(key, default_revenues[i])
                 rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, default_val, 100000, format="$%d", key=key)
                 rev_targets.append(rev_slider_val)
@@ -397,7 +392,9 @@ with st.sidebar:
             product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, st.session_state.get(f'pdr_{product}', 3.65), 0.05, key=f'pdr_{product}')
             product_inputs[product]['price_floor'] = st.number_input('Minimum Price ($):', 0.0, value=st.session_state.get(f'price_floor_{product}', 14.0), step=0.5, key=f'price_floor_{product}')
     
+    # --- Run Button ---
     run_button = st.sidebar.button("Run Full Analysis", use_container_width=True)
+
 
 # --- App Logic and Display ---
 if run_button:
