@@ -58,7 +58,7 @@ def deserialize_from_firestore(value):
 
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
-    st.session_state.products = ["Product A", "Product B"]
+    st.session_state.products = ["Plant Based", "Egg Replacement", "Baking"]
 if 'results' not in st.session_state:
     st.session_state.results = {}
 
@@ -257,7 +257,7 @@ def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quar
     return lead_plan.astype(int)
 
 # --- UI and Logic ---
-st.title("Dynamic Multi-Product Business Plan Dashboard")
+st.title("Meala Dynamic Multi-Product Business Plan Dashboard")
 
 with st.sidebar:
     st.title("Business Plan Controls")
