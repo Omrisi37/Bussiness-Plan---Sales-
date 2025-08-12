@@ -123,7 +123,48 @@ def save_scenario(user_id, scenario_name, data):
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
     except Exception as e:
         st.sidebar.error(f"Error saving scenario: {e}")
-
+def create_yearly_bar_chart(df_quarterly, title, y_axis_label, is_cumulative=False):
+    """
+    Creates a yearly grouped bar chart from quarterly data.
+    - If is_cumulative is True, it takes the last value of each year.
+    - Otherwise, it sums the values for each year.
+    """
+    # 1. Data Preparation
+    if is_cumulative:
+        # For cumulative data, we want the value at the end of each year
+        df_yearly = df_quarterly.resample('YE').last()
+    else:
+        # For new leads/customers, we sum the quarters to get the yearly total
+        df_yearly = df_quarterly.resample('YE').sum()
+    
+    df_yearly.index = df_yearly.index.year # Use just the year number for the x-axis
+    df_yearly.index.name = "Year"
+    
+    # Melt the dataframe to make it "tidy" for Seaborn
+    df_melted = df_yearly.reset_index().melt(
+        id_vars='Year', 
+        var_name='Customer Type', 
+        value_name='Count'
+    )
+    
+    # 2. Plotting
+    fig, ax = plt.subplots(figsize=(14, 7))
+    sns.barplot(data=df_melted, x='Year', y='Count', hue='Customer Type', ax=ax, palette='viridis')
+    
+    # 3. Aesthetics
+    ax.set_title(title, fontsize=18, weight='bold', pad=20)
+    ax.set_xlabel("Year", fontsize=12)
+    ax.set_ylabel(y_axis_label, fontsize=12)
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+    ax.legend(title='Customer Type')
+    
+    # Add labels on top of each bar
+    for container in ax.containers:
+        ax.bar_label(container, fmt='{:,.0f}', padding=3, fontsize=9)
+        
+    plt.tight_layout()
+    return fig
+    
 def get_user_scenarios(user_id):
     if not db or not user_id:
         return []
@@ -424,15 +465,64 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
+            # --- טבלה 0 + גרף 0 ---
+            st.subheader("Lead Generation")
+            st.markdown("#### Table 0: Recommended Lead Contact Plan")
             lead_plan_display = results[product_name]["lead_plan"].T
             lead_plan_display.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display.columns]
+            st.dataframe(lead_plan_display.style.format("{:d}"))
 
+            # --- START of new chart code ---
+            st.markdown("##### Chart 0: Yearly Lead Contact Plan")
+            fig0 = create_yearly_bar_chart(
+                df_quarterly=results[product_name]["lead_plan"],
+                title=f"Leads to Contact per Year - {product_name}",
+                y_axis_label="Number of Leads to Contact"
+            )
+            st.pyplot(fig0)
+            st.markdown("---")
+            # --- END of new chart code ---
+
+
+            # --- טבלה 1 + גרף 1 ---
+            st.subheader("Action Plan & Outcomes")
+            st.markdown("#### Table 1: Acquired New Customers per Quarter")
             acquired_customers_display = results[product_name]["acquired_customers_plan"].T
             acquired_customers_display.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display.columns]
-            
+            st.dataframe(acquired_customers_display.style.format("{:d}"))
+
+            # --- START of new chart code ---
+            st.markdown("##### Chart 1: Yearly Acquired New Customers")
+            fig1 = create_yearly_bar_chart(
+                df_quarterly=results[product_name]["acquired_customers_plan"],
+                title=f"Acquired New Customers per Year - {product_name}",
+                y_axis_label="Number of New Customers"
+            )
+            st.pyplot(fig1)
+            st.markdown("---")
+            # --- END of new chart code ---
+
+
+            # --- טבלה 2 + גרף 2 ---
+            st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
             cum_cust_display = results[product_name]["cumulative_customers"].T
             cum_cust_display.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display.columns]
+            st.dataframe(cum_cust_display.style.format("{:,d}"))
 
+            # --- START of new chart code ---
+            st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
+            fig2 = create_yearly_bar_chart(
+                df_quarterly=results[product_name]["cumulative_customers"],
+                title=f"Cumulative Customers at Year End - {product_name}",
+                y_axis_label="Total Number of Customers",
+                is_cumulative=True
+            )
+            st.pyplot(fig2)
+            st.markdown("---")
+            # --- END of new chart code ---
+
+            
+            # --- שאר התוצאות (טבלה 3, גרף הכנסות וכו') ---
             validation_df = pd.DataFrame({
                 'Target Revenue': results[product_name]['annual_revenue_targets'],
                 'Actual Revenue': results[product_name]['annual_revenue']
@@ -440,17 +530,6 @@ if st.session_state.results:
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
             
-            st.subheader("Lead Generation")
-            st.markdown("#### Table 0: Recommended Lead Contact Plan")
-            st.dataframe(lead_plan_display.style.format("{:d}"))
-
-            st.subheader("Action Plan & Outcomes")
-            st.markdown("#### Table 1: Acquired New Customers per Quarter")
-            st.dataframe(acquired_customers_display.style.format("{:d}"))
-
-            st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
-            st.dataframe(cum_cust_display.style.format("{:,d}"))
-
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
             
@@ -465,7 +544,11 @@ if st.session_state.results:
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
             ax.set_xlabel("Year", fontsize=12)
             ax.set_ylabel("Revenue", fontsize=12)
-            # הוספת הטבלאות החסרות
+            for container in barplot.containers:
+                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
+            st.pyplot(fig)
+
+            # --- טבלאות נסתרות ---
             with st.expander("View Underlying Assumptions"):
                 tons_per_customer_df = results[product_name].get('tons_per_customer')
                 pen_rate_df = results[product_name].get('pen_rate_df')
@@ -477,9 +560,6 @@ if st.session_state.results:
                 if pen_rate_df is not None:
                     st.markdown("#### Table 5: Generated Penetration Rates to Meet Target (%)")
                     st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
-            for container in barplot.containers:
-                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
-            st.pyplot(fig)
 
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
