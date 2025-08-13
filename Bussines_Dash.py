@@ -63,23 +63,32 @@ def add_df_to_slide(slide, df, left, top, width, height, font_size=9):
     return table_shape
 
 def create_product_presentation(product_name, data):
-    # --- CHANGE: Use the template file with the correct name ---
-    prs = Presentation('example.pptx') # <--- שם הקובץ עודכן כאן
+    prs = Presentation('example.pptx')
     prs.slide_width = Inches(16)
     prs.slide_height = Inches(9)
     
-    # TODO: עדכן את מספרי ה-layout לפי התבנית שלך!
+    # TODO: עדכן את המספרים האלה לפי הפלט של check_layouts.py
     title_slide_layout = prs.slide_layouts[0] 
     blank_slide_layout = prs.slide_layouts[6]
 
     # --- Title Slide ---
     slide = prs.slides.add_slide(title_slide_layout)
     slide.shapes.title.text = f"Business Plan Analysis: {product_name}"
-    try:
-        slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
-    except IndexError:
-        pass 
 
+    # =======================================================
+    #               *** START OF THE FIX ***
+    # This will now safely handle layouts with no subtitle
+    # =======================================================
+    try:
+        current_date = pd.Timestamp.now(tz='Asia/Jerusalem').strftime('%d/%m/%Y')
+        slide.placeholders[1].text = f"Generated on: {current_date}"
+    except (KeyError, IndexError):
+        # This layout doesn't have a subtitle placeholder, which is fine.
+        pass
+    # =======================================================
+    #               *** END OF THE FIX ***
+    # =======================================================
+        
     # ... (שאר הקוד של הפונקציה ממשיך כרגיל) ...
     df_leads_q = data['lead_plan'].T
     df_leads_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_leads_q.columns]
@@ -117,10 +126,8 @@ def create_product_presentation(product_name, data):
     prs.save(ppt_buffer)
     ppt_buffer.seek(0)
     return ppt_buffer.getvalue()
-
 def create_summary_presentation(summary_data, all_results):
-    # --- CHANGE: Use the template file with the correct name ---
-    prs = Presentation('example.pptx') # <--- שם הקובץ עודכן כאן
+    prs = Presentation('example.pptx')
     prs.slide_width = Inches(16)
     prs.slide_height = Inches(9)
     
@@ -131,10 +138,20 @@ def create_summary_presentation(summary_data, all_results):
     # --- Title Slide ---
     slide = prs.slides.add_slide(title_slide_layout)
     slide.shapes.title.text = "Overall Summary Report"
+    
+    # =======================================================
+    #               *** START OF THE FIX ***
+    # This will now safely handle layouts with no subtitle
+    # =======================================================
     try:
-        slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
-    except IndexError:
+        current_date = pd.Timestamp.now(tz='Asia/Jerusalem').strftime('%d/%m/%Y')
+        slide.placeholders[1].text = f"Generated on: {current_date}"
+    except (KeyError, IndexError):
+        # This layout doesn't have a subtitle placeholder, which is fine.
         pass
+    # =======================================================
+    #               *** END OF THE FIX ***
+    # =======================================================
         
     # ... (שאר הקוד של הפונקציה ממשיך כרגיל) ...
     slide = prs.slides.add_slide(blank_slide_layout)
