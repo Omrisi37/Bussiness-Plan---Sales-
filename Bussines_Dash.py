@@ -18,120 +18,158 @@ st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 
 
-# הוסף את שתי הפונקציות החדשות האלה יחד עם שאר הפונקציות
-def add_df_to_slide(slide, df, left, top, width, height):
+# מחק את add_df_to_slide ו-to_powerpoint הקיימות, והדבק את אלה במקומן
+
+def add_df_to_slide(slide, df, left, top, width, height, col_widths=None):
     """
-    Helper function to add a pandas DataFrame to a PowerPoint slide.
+    Helper function to add a pandas DataFrame to a PowerPoint slide with better formatting.
     """
     rows, cols = df.shape
     rows += 1 # Add a row for the header
     table_shape = slide.shapes.add_table(rows, cols, left, top, width, height)
     table = table_shape.table
 
-    # Set column widths (optional, but can improve layout)
-    for i in range(cols):
-        table.columns[i].width = Inches(width.inches / cols)
+    # Set column widths
+    if col_widths:
+        for i, width_inch in enumerate(col_widths):
+            table.columns[i].width = Inches(width_inch)
+    else: # Default equal width
+        for i in range(cols):
+            table.columns[i].width = Inches(width.inches / cols)
 
-    # Write table headers
+    # Write table headers and format them
     for i, col_name in enumerate(df.columns):
         cell = table.cell(0, i)
         cell.text = str(col_name)
-        cell.text_frame.paragraphs[0].font.bold = True
-        cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+        p = cell.text_frame.paragraphs[0]
+        p.font.bold = True
+        p.font.size = Pt(10)
+        p.alignment = PP_ALIGN.CENTER
 
-    # Write table data
+    # Write table data and format it
     for r in range(rows - 1):
         for c in range(cols):
             cell = table.cell(r + 1, c)
             cell.text = str(df.iloc[r, c])
-            # Optional: format numbers, etc.
-            cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+            p = cell.text_frame.paragraphs[0]
+            p.font.size = Pt(9)
+            p.alignment = PP_ALIGN.CENTER
+            
+    return table_shape
 
-def to_powerpoint(results_dict):
-    """
-    Generates a PowerPoint presentation from the results dictionary.
-    """
+def create_product_presentation(product_name, data):
+    """Generates a PowerPoint presentation for a single product."""
     prs = Presentation()
-    
-    # Set a widescreen layout
     prs.slide_width = Inches(16)
     prs.slide_height = Inches(9)
+    blank_slide_layout = prs.slide_layouts[6] # A blank layout
 
-    # Title slide
+    # --- Title Slide ---
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
-    title = slide.shapes.title
-    subtitle = slide.placeholders[1]
-    title.text = "Business Plan Analysis Report"
-    subtitle.text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
+    slide.shapes.title.text = f"Business Plan Analysis: {product_name}"
+    slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
 
-    # Layout for content slides
-    content_slide_layout = prs.slide_layouts[5] # Blank slide layout
+    # --- Slide 1: Lead Plan (Chart & Table) ---
+    slide = prs.slides.add_slide(blank_slide_layout)
+    slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Lead Contact Plan (Yearly)"
+    
+    # Chart
+    leads_full = data["lead_plan"]
+    leads_filtered = leads_full[leads_full.index.year != 2030]
+    fig = create_yearly_bar_chart(leads_filtered, "", "")
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    slide.shapes.add_picture(img_buffer, Inches(0.5), Inches(1.2), width=Inches(8))
+    plt.close(fig)
 
-    for product_name, data in results_dict.items():
-        if product_name == 'summary':
-            continue
+    # Table
+    df_leads_yearly = leads_filtered.resample('YE').sum()
+    df_leads_yearly.index = df_leads_yearly.index.year
+    add_df_to_slide(slide, df_leads_yearly.T, Inches(9), Inches(2), Inches(6.5), Inches(3))
+    
+    # --- Slide 2: Acquired Customers (Chart & Table) ---
+    slide = prs.slides.add_slide(blank_slide_layout)
+    slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Acquired New Customers (Yearly)"
+    
+    # Chart
+    fig = create_yearly_bar_chart(data["acquired_customers_plan"], "", "")
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    slide.shapes.add_picture(img_buffer, Inches(0.5), Inches(1.2), width=Inches(8))
+    plt.close(fig)
 
-        # --- Add a title slide for the product ---
-        product_title_slide_layout = prs.slide_layouts[1]
-        slide = prs.slides.add_slide(product_title_slide_layout)
-        title = slide.shapes.title
-        title.text = f"Analysis for: {product_name}"
+    # Table
+    df_acquired_yearly = data["acquired_customers_plan"].resample('YE').sum()
+    df_acquired_yearly.index = df_acquired_yearly.index.year
+    add_df_to_slide(slide, df_acquired_yearly.T, Inches(9), Inches(2), Inches(6.5), Inches(3))
+    
+    # --- Slide 3: Revenue (Chart Only) ---
+    slide = prs.slides.add_slide(blank_slide_layout)
+    slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Target vs. Actual Revenue"
+    
+    validation_df = data['validation_df']
+    plot_df_melted = validation_df.reset_index().melt(id_vars='Year', var_name='Type', value_name='Revenue')
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
+    for container in ax.containers: ax.bar_label(container, fmt='${:,.0f}', padding=5)
+    
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    slide.shapes.add_picture(img_buffer, Inches(1), Inches(1.2), width=Inches(14))
+    plt.close(fig)
 
-        # --- Add Chart 0: Lead Plan ---
-        slide = prs.slides.add_slide(content_slide_layout)
-        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
-        title.text_frame.text = "Chart 0: Yearly Lead Contact Plan"
-        
-        leads_data_full = data["lead_plan"]
-        leads_data_filtered = leads_data_full[leads_data_full.index.year != 2030]
-        fig = create_yearly_bar_chart(leads_data_filtered, "", "") # No title needed in the image itself
-        
-        img_buffer = io.BytesIO()
-        fig.savefig(img_buffer, format='png', dpi=300)
-        img_buffer.seek(0)
-        
-        slide.shapes.add_picture(img_buffer, Inches(1), Inches(1), width=Inches(14))
-        plt.close(fig) # Close the figure to free memory
-
-        # --- Add Table 1: Acquired Customers ---
-        slide = prs.slides.add_slide(content_slide_layout)
-        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
-        title.text_frame.text = "Table 1: Acquired New Customers per Quarter"
-        
-        df_acquired = data['acquired_customers_plan'].T
-        df_acquired.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired.columns]
-        add_df_to_slide(slide, df_acquired.reset_index(), Inches(0.5), Inches(1), Inches(15), Inches(4))
-
-        # --- Add Chart 3: Revenue ---
-        slide = prs.slides.add_slide(content_slide_layout)
-        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
-        title.text_frame.text = "Chart: Target vs. Actual Annual Revenue"
-        
-        validation_df = data['validation_df']
-        plot_df = validation_df.reset_index()
-        plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
-        
-        fig, ax = plt.subplots(figsize=(14, 7))
-        sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
-        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
-        for container in ax.containers:
-            ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9)
-        
-        img_buffer = io.BytesIO()
-        fig.savefig(img_buffer, format='png', dpi=300)
-        img_buffer.seek(0)
-        
-        slide.shapes.add_picture(img_buffer, Inches(1), Inches(1), width=Inches(14))
-        plt.close(fig)
-
-    # Save the presentation to an in-memory buffer
+    # --- Save to buffer ---
     ppt_buffer = io.BytesIO()
     prs.save(ppt_buffer)
     ppt_buffer.seek(0)
-    
     return ppt_buffer.getvalue()
 
+def create_summary_presentation(summary_data, all_results):
+    """Generates a PowerPoint presentation for the overall summary."""
+    prs = Presentation()
+    prs.slide_width = Inches(16)
+    prs.slide_height = Inches(9)
+    blank_slide_layout = prs.slide_layouts[6]
+
+    # --- Title Slide ---
+    title_slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(title_slide_layout)
+    slide.shapes.title.text = "Overall Summary Report"
+    slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
+    
+    # --- Slide 1: Revenue Breakdown Chart ---
+    slide = prs.slides.add_slide(blank_slide_layout)
+    slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Total Revenue Breakdown by Product"
+    
+    product_list = [p for p in all_results.keys() if p != 'summary']
+    all_revenues = {p: all_results[p]['annual_revenue'] for p in product_list}
+    summary_plot_df = pd.DataFrame(all_revenues)
+    summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax, palette="rocket_r")
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
+    
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    slide.shapes.add_picture(img_buffer, Inches(1), Inches(1.2), width=Inches(14))
+    plt.close(fig)
+    
+    # --- Slide 2: Cumulative Customers Table ---
+    slide = prs.slides.add_slide(blank_slide_layout)
+    slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Total Cumulative Customers (Quarterly)"
+    
+    df_summary_cust = summary_data["summary_customers_raw"].to_frame("Total Customers").T
+    df_summary_cust.columns = [f"{c.year}-Q{c.quarter}" for c in df_summary_cust.columns]
+    add_df_to_slide(slide, df_summary_cust, Inches(0.5), Inches(1.5), Inches(15), Inches(2))
+
+    # --- Save to buffer ---
+    ppt_buffer = io.BytesIO()
+    prs.save(ppt_buffer)
+    ppt_buffer.seek(0)
+    return ppt_buffer.getvalue()
 # =========================
 # פונקציות המרה ל/מ Firestore
 # =========================
@@ -618,153 +656,88 @@ if st.session_state.results:
     
     display_start_date = pd.Timestamp('2025-07-01')
 
+    # --- לולאה להצגת התוצאות בכל לשונית של מוצר ---
     for i, product_name in enumerate(product_list):
         with tabs[i]:
             st.header(f"Results for {product_name}")
-            leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
-            acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
-            cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
             
+            # ... (כל קוד התצוגה של הטבלאות והגרפים שכבר קיים) ...
+            # (השארתי אותו מקוצר כדי לא להעמיס, אבל הוא צריך להיות כאן)
             st.subheader("Lead Generation")
-            st.markdown("#### Table 0: Recommended Lead Contact Plan")
+            leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
             lead_plan_display_T = leads_to_display.T
             lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
             st.dataframe(lead_plan_display_T.style.format("{:d}"))
-            
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
-            # =======================================================
-            #               *** START OF MODIFICATION ***
-            #  יצירת משתנה חדש ומסונן במיוחד עבור הגרף, כדי לא לשנות את הטבלה
-            # =======================================================
             leads_for_chart0 = leads_to_display[leads_to_display.index.year != 2030]
-            
-            fig0 = create_yearly_bar_chart(
-                df_quarterly=leads_for_chart0, # שימוש במשתנה המסונן
-                title=f"Leads to Contact per Year - {product_name}", 
-                y_axis_label="Number of Leads to Contact"
-            )
-            # =======================================================
-            #               *** END OF MODIFICATION ***
-            # =======================================================
+            fig0 = create_yearly_bar_chart(df_quarterly=leads_for_chart0, title=f"Leads to Contact per Year - {product_name}", y_axis_label="Number of Leads to Contact")
             st.pyplot(fig0)
+            # ... וכן הלאה לשאר הטבלאות והגרפים ...
+
             st.markdown("---")
+            # --- כפתורי הורדה ספציפיים למוצר ---
+            col1, col2 = st.columns(2)
+            with col1:
+                # הכנת נתוני אקסל רק למוצר הזה
+                excel_product_data = to_excel({product_name: results[product_name]})
+                if excel_product_data:
+                    st.download_button(
+                        label=f"📥 Download {product_name} to Excel",
+                        data=excel_product_data,
+                        file_name=f"{product_name}_Report.xlsx",
+                        use_container_width=True
+                    )
+            with col2:
+                # הכנת נתוני מצגת רק למוצר הזה
+                ppt_product_data = create_product_presentation(product_name, results[product_name])
+                if ppt_product_data:
+                    st.download_button(
+                        label=f"📊 Download {product_name} Presentation",
+                        data=ppt_product_data,
+                        file_name=f"{product_name}_Presentation.pptx",
+                        use_container_width=True
+                    )
 
-            st.subheader("Action Plan & Outcomes")
-            st.markdown("#### Table 1: Acquired New Customers per Quarter")
-            acquired_customers_display_T = acquired_to_display.T
-            acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
-            st.dataframe(acquired_customers_display_T.style.format("{:d}"))
-            
-            st.markdown("##### Chart 1: Yearly Acquired New Customers")
-            fig1 = create_yearly_bar_chart(df_quarterly=acquired_to_display, title=f"Acquired New Customers per Year - {product_name}", y_axis_label="Number of New Customers")
-            st.pyplot(fig1)
-            st.markdown("---")
 
-            st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
-            cum_cust_display_T = cumulative_to_display.T
-            cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
-            st.dataframe(cum_cust_display_T.style.format("{:,d}"))
-
-            st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
-            fig2 = create_yearly_bar_chart(df_quarterly=cumulative_to_display, title=f"Cumulative Customers at Year End - {product_name}", y_axis_label="Total Number of Customers", is_cumulative=True)
-            st.pyplot(fig2)
-            st.markdown("---")
-            
-            validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
-            validation_df.index.name = "Year"
-            results[product_name]['validation_df'] = validation_df
-            
-            st.markdown("#### Table 3: Target vs. Actual Revenue")
-            st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
-            
-            st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
-            plot_df = validation_df.reset_index()
-            plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
-            fig, ax = plt.subplots(figsize=(14, 7))
-            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
-            ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=18, weight='bold')
-            ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
-            ax.set_xlabel("Year", fontsize=12)
-            ax.set_ylabel("Revenue", fontsize=12)
-            for container in barplot.containers:
-                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
-            st.pyplot(fig)
-            
-            with st.expander("View Underlying Assumptions"):
-                tons_per_customer_df = results[product_name].get('tons_per_customer')
-                pen_rate_df = results[product_name].get('pen_rate_df')
-                if tons_per_customer_df is not None:
-                    st.markdown("#### Table 4: Annual Tons per Single Customer (Target-Driven)")
-                    st.dataframe(tons_per_customer_df.T.style.format("{:,.2f}"))
-                if pen_rate_df is not None:
-                    st.markdown("#### Table 5: Generated Penetration Rates to Meet Target (%)")
-                    st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
-
+    # --- לשונית הסיכום הכללי ---
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
+        
+        # חישוב נתוני הסיכום (כמו שהיה קודם)
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
+
+        # ... (כל קוד התצוגה של טבלאות וגרפי הסיכום, כפי שהיה) ...
         summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
-        summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
-        summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
-        st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
-        st.dataframe(summary_customers_display_T.style.format("{:,d}"))
-        st.markdown("#### Chart: Total Revenue Breakdown by Product")
-        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
-        summary_plot_df = pd.DataFrame(all_revenues)
-        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-        fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
-        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
-        for container in ax_sum.containers:
-            ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
-        ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
-        ax_sum.set_ylabel('Revenue ($)', fontsize=12)
-        ax_sum.set_xlabel('Year', fontsize=12)
-        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-        ax_sum.tick_params(axis='x', rotation=0)
-        st.pyplot(fig_sum)
-    # --- הכנת האקסל וכפתור ההורדה ---
-    # כל הקוד הזה נמצא בתוך בלוק ה-if הראשי
-    # --- הכנת קבצים להורדה וכפתורים ---
-    # כל הקוד הזה נמצא בתוך בלוק ה-if הראשי
-    excel_results_to_pass = {}
-    for prod_name, res_data in results.items():
-        excel_results_to_pass[prod_name] = res_data.copy()
-    
-    summary_for_excel = {
-        "summary_revenue": summary_revenue_df,
-        "summary_customers_raw": summary_customers_total_q_raw
-    }
-    
-    # יצירת נתונים עבור שני הקבצים
-    excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
-    ppt_data = to_powerpoint(results) # קריאה לפונקציה החדשה
+        # ... וכן הלאה ...
 
-    # יצירת שתי עמודות לכפתורים
-    col1, col2 = st.columns(2)
+        st.markdown("---")
+        # --- כפתורי הורדה ספציפיים לסיכום ---
+        col1, col2 = st.columns(2)
+        summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
+        with col1:
+            excel_summary_data = to_excel({"summary": summary_for_excel})
+            if excel_summary_data:
+                 st.download_button(
+                    label="📥 Download Summary to Excel",
+                    data=excel_summary_data,
+                    file_name="Overall_Summary_Report.xlsx",
+                    use_container_width=True
+                )
+        with col2:
+            ppt_summary_data = create_summary_presentation(summary_for_excel, results)
+            if ppt_summary_data:
+                st.download_button(
+                    label="📊 Download Summary Presentation",
+                    data=ppt_summary_data,
+                    file_name="Overall_Summary_Presentation.pptx",
+                    use_container_width=True
+                )
 
-    with col1:
-        # הצג את כפתור הורדת האקסל רק אם הנתונים לא ריקים
-        if excel_data:
-            st.download_button(
-                label="📥 Download Full Report to Excel", 
-                data=excel_data, 
-                file_name="Business_Plan_Full_Report.xlsx",
-                use_container_width=True
-            )
-    with col2:
-        # הצג את כפתור הורדת המצגת רק אם הנתונים לא ריקים
-        if ppt_data:
-            st.download_button(
-                label="📊 Download Presentation",
-                data=ppt_data,
-                file_name="Business_Plan_Presentation.pptx",
-                use_container_width=True
-            )
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
