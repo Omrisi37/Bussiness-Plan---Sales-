@@ -16,7 +16,8 @@ from pptx.enum.text import PP_ALIGN
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
-
+# --- Global Settings ---
+MODEL_START_YEAR = 2026
 
 def add_fig_to_slide(slide, fig, left, top, width):
     """
@@ -403,8 +404,8 @@ def load_scenario_data(user_id, scenario_name):
 
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor):
-    # --- CHANGE: Main calculation now starts from 2026 ---
-    CALCULATION_START_YEAR = 2026
+    # Use the global start year
+    CALCULATION_START_YEAR = MODEL_START_YEAR
     NUM_YEARS = 6
     years = np.array([CALCULATION_START_YEAR + i for i in range(NUM_YEARS)])
     quarters_index = pd.date_range(start=f'{CALCULATION_START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
@@ -414,13 +415,12 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     tons_per_customer.loc[CALCULATION_START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
     target_tons = {'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
+    # ... (שאר הפונקציה ממשיך ללא שינוי)
     pen_rate_df = pd.DataFrame(index=range(1, NUM_YEARS + 1), columns=customer_types)
     for c_type in customer_types:
         total_market_growth_factor = (1 + market_gr / 100) ** (NUM_YEARS - 1)
-        if initial_tons[c_type] == 0:
-            required_pen_growth_factor = 1.0
-        else:
-            required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
+        if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
+        else: required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
         pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
         x, y = [1, 2.5, NUM_YEARS], [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final]
         interp_func = PchipInterpolator(x, y)
@@ -431,7 +431,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
             prev_tons, market_growth_factor = tons_per_customer.loc[prev_year, c_type], (1 + market_gr / 100)
             pen_growth_factor = pen_rate_df.loc[year_idx + 1, c_type] / pen_rate_df.loc[year_idx, c_type]
             tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
-
     prices = []
     current_price = ip_kg
     decay_rate = pdr / 100.0
@@ -441,13 +440,10 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         current_price = max(next_price, price_floor)
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
-    
     quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
     total_focus = f_m + f_l + f_g
-    if total_focus == 0:
-        return {"error": "Total Sales Focus must be greater than 0."}
+    if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
     focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
-
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     for i, q_date in enumerate(quarters_index):
@@ -462,24 +458,13 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
                 for c_type in customer_types:
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
-
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     revenue_per_segment_q = revenue_per_customer_type_q * cumulative_customers.round().astype(int)
     actual_revenue_q = revenue_per_segment_q.sum(axis=1)
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
     annual_revenue_series.index = years
     annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
-    
-    return {
-        "cumulative_customers": cumulative_customers.round().astype(int),
-        "annual_revenue": annual_revenue_series,
-        "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_per_customer": tons_per_customer,
-        "pen_rate_df": pen_rate_df,
-        "acquired_customers_plan": new_customers_plan.astype(int),
-        "revenue_per_segment_q": revenue_per_segment_q,
-        "error": None
-    }
+    return {"cumulative_customers": cumulative_customers.round().astype(int), "annual_revenue": annual_revenue_series, "annual_revenue_targets": annual_revenue_targets_series, "tons_per_customer": tons_per_customer, "pen_rate_df": pen_rate_df, "acquired_customers_plan": new_customers_plan.astype(int), "revenue_per_segment_q": revenue_per_segment_q, "error": None}
 
 
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
@@ -640,10 +625,17 @@ with st.sidebar:
             default_revenues = [300000, 2700000, 5500000, 12000000, 32000000, 40000000]
             rev_targets = []
             for i in range(6):
-                year_num = i + 1
-                key = f'rev_y{year_num}_{product}'
+                actual_year = MODEL_START_YEAR + i
+                key = f'rev_y{i+1}_{product}'
                 default_val = st.session_state.get(key, default_revenues[i])
-                rev_slider_val = st.slider(f'Year {year_num}:', 0, 50_000_000, default_val, 100000, format="$%d", key=key)
+                rev_slider_val = st.slider(
+                    f'Target for {actual_year}:', 
+                    0, 50_000_000, 
+                    default_val, 
+                    100000, 
+                    format="$%d", 
+                    key=key
+                )
                 rev_targets.append(rev_slider_val)
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
