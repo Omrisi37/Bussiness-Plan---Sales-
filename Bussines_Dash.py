@@ -565,51 +565,21 @@ with st.sidebar:
                     st.caption("No scenarios found to load or delete.")
             
             # --- עמודה ימנית: שמירה ---
-            # --- עמודה ימנית: שמירה ועדכון ---
             with col_save:
-                st.subheader("Save or Update")
+                st.subheader("Save New")
                 scenario_name_to_save = st.text_input("Save as scenario name:", key="scenario_name")
-                
-                # =======================================================
-                #               *** START OF NEW LOGIC ***
-                #         Logic for allowing scenario overwrite
-                # =======================================================
-    
-                confirm_overwrite = False
-                # בדוק אם השם שהוזן כבר קיים ברשימת התרחישים השמורים
-                if scenario_name_to_save and scenario_name_to_save in saved_scenarios:
-                    st.warning(f"Scenario '{scenario_name_to_save}' already exists.")
-                    confirm_overwrite = st.checkbox("Overwrite existing scenario", key="overwrite_checkbox")
-    
                 if st.button("Save Current") and scenario_name_to_save:
-                    # המקרה שבו התרחיש קיים
                     if scenario_name_to_save in saved_scenarios:
-                        if confirm_overwrite:
-                            # המשתמש אישר לדרוס את הקובץ
-                            all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
-                            keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox', 'overwrite_checkbox', 'pie_select']
-                            for key, value in st.session_state.items():
-                                if isinstance(key, str) and not any(key.startswith(p) for p in keys_to_exclude):
-                                    all_inputs[key] = value
-                            save_scenario(user_id, scenario_name_to_save, all_inputs)
-                            st.success(f"Scenario '{scenario_name_to_save}' was updated successfully!")
-                            st.rerun()
+                        st.error(f"Scenario '{scenario_name_to_save}' already exists.")
                     else:
-                        # המשתמש ניסה לשמור על שם קיים בלי לאשר
-                        st.error("Please check the 'Overwrite' box to update an existing scenario.")
-                
-                # המקרה שבו התרחיש חדש
-                else:
-                    all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
-                    keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox', 'overwrite_checkbox', 'pie_select']
-                    for key, value in st.session_state.items():
-                        if isinstance(key, str) and not any(key.startswith(p) for p in keys_to_exclude):
-                            all_inputs[key] = value
-                    save_scenario(user_id, scenario_name_to_save, all_inputs)
-                    st.rerun()
-            # =======================================================
-            #               *** END OF NEW LOGIC ***
-            # =======================================================
+                        all_inputs = { 'user_id': st.session_state.get('user_id', ''), 'products': st.session_state.get('products', []) }
+                        keys_to_exclude = ['results', 'user_id', 'products', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox']
+                        for key, value in st.session_state.items():
+                            is_excluded = key in keys_to_exclude or key.startswith(('FormSubmitter', '_'))
+                            if isinstance(key, str) and not is_excluded:
+                                all_inputs[key] = value
+                        save_scenario(user_id, scenario_name_to_save, all_inputs)
+                        st.rerun()
 
     # --- Expander for Managing Products ---
     with st.expander("Manage Products"):
