@@ -316,8 +316,12 @@ def save_scenario(user_id, scenario_name, data):
     try:
         data_to_save = {}
         for k, v in data.items():
-            if isinstance(k, str) and k not in ['results', 'load_scenario_select', 'scenario_name', 'new_product_name_input'] and not k.startswith(('FormSubmitter', '_')):
+            # --- START OF FIX ---
+            # Added 'pie_select' to the list of prefixes to ignore during save
+            if isinstance(k, str) and not k.startswith(('results', 'load_scenario_select', 'scenario_name', 'new_product_name_input', 'confirm_delete_checkbox', 'FormSubmitter', '_', 'pie_select')):
+            # --- END OF FIX ---
                 data_to_save[k] = serialize_for_firestore(v)
+        
         db.collection('users').document(user_id).collection('scenarios').document(scenario_name).set(data_to_save)
         st.sidebar.success(f"Scenario '{scenario_name}' saved!")
     except Exception as e:
