@@ -658,7 +658,7 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # ... (כל קוד התצוגה הקיים עד לגרף 2) ...
+            # ... (קוד תצוגה קיים) ...
             leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
             acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
             cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
@@ -690,14 +690,11 @@ if st.session_state.results:
             st.pyplot(fig2)
 
             # =======================================================
-            #               *** START OF NEW FEATURE ***
-            #         Interactive Pie Chart for Cumulative Customers
+            #        *** START OF PIE CHART FEATURE - UPDATED ***
             # =======================================================
             st.markdown("---")
             st.subheader("Interactive Analysis: Customer & Revenue Mix per Quarter")
 
-            # 1. Create the dropdown
-            # We use the full (not filtered by start date) cumulative data for the options
             quarter_options = results[product_name]['cumulative_customers'].index
             selected_quarter = st.selectbox(
                 "Select a Quarter to Analyze",
@@ -707,50 +704,44 @@ if st.session_state.results:
             )
 
             if selected_quarter:
-                # 2. Get data for the selected quarter
                 cust_data_for_quarter = results[product_name]['cumulative_customers'].loc[selected_quarter]
                 rev_data_for_quarter = results[product_name]['revenue_per_segment_q'].loc[selected_quarter]
                 
-                # Filter out segments with zero customers to avoid cluttering the pie chart
                 non_zero_cust_data = cust_data_for_quarter[cust_data_for_quarter > 0]
 
                 if not non_zero_cust_data.empty:
-                    # 3. Create the pie chart
                     fig_pie, ax_pie = plt.subplots(figsize=(12, 7))
                     
-                    wedges, texts, autotexts = ax_pie.pie(
+                    # --- NEW: Create combined labels ---
+                    total_customers = non_zero_cust_data.sum()
+                    pie_labels = []
+                    for segment, count in non_zero_cust_data.items():
+                        percentage = (count / total_customers) * 100
+                        revenue = rev_data_for_quarter[segment]
+                        rev_text = f"${revenue/1_000_000:.2f}M" if revenue >= 1_000_000 else f"${revenue/1_000:,.0f}K"
+                        pie_labels.append(f"{segment}\n{percentage:.1f}%\n({rev_text})")
+
+                    # --- NEW: Define a nicer color palette ---
+                    colors = sns.color_palette('crest', n_colors=len(non_zero_cust_data))
+
+                    wedges, texts = ax_pie.pie(
                         non_zero_cust_data,
-                        labels=non_zero_cust_data.index,
-                        autopct='%1.1f%%', # Basic percentage
+                        labels=pie_labels,
+                        colors=colors, # Use new colors
                         startangle=90,
-                        pctdistance=0.85,
-                        wedgeprops=dict(width=0.4, edgecolor='w')
+                        wedgeprops=dict(width=0.4, edgecolor='w'),
+                        textprops={'fontsize': 12} # Control label font size
                     )
                     
-                    # 4. Create custom labels with revenue
-                    total_rev_for_quarter = rev_data_for_quarter.sum()
-                    for i, p in enumerate(wedges):
-                        ang = (p.theta2 - p.theta1)/2. + p.theta1
-                        y = np.sin(np.deg2rad(ang))
-                        x = np.cos(np.deg2rad(ang))
-                        
-                        revenue = rev_data_for_quarter[non_zero_cust_data.index[i]]
-                        rev_text = f"${revenue/1_000_000:.2f}M" if revenue > 1_000_000 else f"${revenue/1_000:,.0f}K"
-                        
-                        # Place the revenue text outside the percentage
-                        ax_pie.text(x*1.1, y*1.1, rev_text, ha='center', va='center', fontsize=11, fontweight='bold')
-
                     ax_pie.set_title(f"Customer & Revenue Mix for {selected_quarter.year}-Q{selected_quarter.quarter}", fontsize=16, weight='bold')
-                    ax_pie.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
                     st.pyplot(fig_pie)
                 else:
                     st.info(f"No cumulative customers found for {selected_quarter.year}-Q{selected_quarter.quarter}.")
-
             # =======================================================
-            #               *** END OF NEW FEATURE ***
+            #         *** END OF PIE CHART FEATURE - UPDATED ***
             # =======================================================
 
-            # ... (The rest of the display code: Table 3, revenue chart, etc.) ...
+            # ... (The rest of the display code) ...
             st.markdown("---")
             validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
             validation_df.index.name = "Year"
@@ -790,8 +781,8 @@ if st.session_state.results:
                     st.download_button(label=f"📊 Download {product_name} Presentation", data=ppt_product_data, file_name=f"{product_name}_Presentation.pptx", use_container_width=True)
 
     with tabs[-1]:
-        # ... (כל קוד הסיכום) ...
         st.header("Overall Summary (All Products)")
+        
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
@@ -803,12 +794,21 @@ if st.session_state.results:
         summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
         st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
         st.dataframe(summary_customers_display_T.style.format("{:,d}"))
+        
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
-        all_revenues = {p: all_results[p]['annual_revenue'] for p in product_list if p in results}
+        
+        # =======================================================
+        #               *** START OF NameError FIX ***
+        # =======================================================
+        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
+        # =======================================================
+        #               *** END OF NameError FIX ***
+        # =======================================================
+
         summary_plot_df = pd.DataFrame(all_revenues)
         summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
         fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
-        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
+        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax_ax_sum, palette="rocket_r")
         for container in ax_sum.containers:
             ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
         ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
