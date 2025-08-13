@@ -451,18 +451,15 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
 
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     
-    # --- START OF CHANGE ---
-    # הוספת השורה הזו כדי לחשב את ההכנסה לכל סוג לקוח בנפרד
+    # --- השורה החדשה שהוספנו ---
     revenue_per_segment_q = revenue_per_customer_type_q * cumulative_customers.round().astype(int)
-    # --- END OF CHANGE ---
 
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
     annual_revenue_series.index = years
     annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
     
-    # --- START OF CHANGE ---
-    # עדכון בלוק ההחזרה כך שיכלול את המידע החדש
+    # --- בלוק ההחזרה המעודכן ---
     return {
         "cumulative_customers": cumulative_customers.round().astype(int),
         "annual_revenue": annual_revenue_series,
@@ -470,10 +467,9 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "tons_per_customer": tons_per_customer,
         "pen_rate_df": pen_rate_df,
         "acquired_customers_plan": new_customers_plan.astype(int),
-        "revenue_per_segment_q": revenue_per_segment_q, # <-- המפתח החדש
+        "revenue_per_segment_q": revenue_per_segment_q, # <-- התוספת החשובה
         "error": None
     }
-    # --- END OF CHANGE ---
 
 
 def create_lead_plan(acquired_customers_plan, success_rates, time_aheads_in_quarters):
