@@ -86,6 +86,12 @@ def create_product_presentation(product_name, data):
     df_cumulative = data['cumulative_customers'].T
     df_cumulative.columns = [f"{c.year}-Q{c.quarter}" for c in df_cumulative.columns]
 
+    # =======================================================
+    #               *** START OF THE FIX ***
+    #      The following slides now use the correct multi-line pattern 
+    #      for saving figures to memory before adding them to the slide.
+    # =======================================================
+
     # --- Slide 1: Lead Plan (Quarterly Table & Chart) ---
     slide = prs.slides.add_slide(blank_slide_layout)
     # Table
@@ -98,7 +104,12 @@ def create_product_presentation(product_name, data):
     sns.barplot(data=df_leads_melted, x='index', y='Count', hue='Customer Type', ax=ax, palette='viridis')
     ax.set_title("Chart 0: Leads to Contact per Quarter")
     ax.tick_params(axis='x', rotation=90, labelsize=8)
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(0.5), Inches(3.2), width=Inches(15))
+    
+    # Correct way to save and add picture
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(0.5), Inches(3.2), width=Inches(15))
     plt.close(fig)
 
     # --- Slide 2: Acquired Customers (Quarterly Table & Chart) ---
@@ -113,7 +124,12 @@ def create_product_presentation(product_name, data):
     sns.barplot(data=df_acquired_melted, x='index', y='Count', hue='Customer Type', ax=ax, palette='plasma')
     ax.set_title("Chart 1: Acquired New Customers per Quarter")
     ax.tick_params(axis='x', rotation=90, labelsize=8)
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(0.5), Inches(3.2), width=Inches(15))
+
+    # Correct way to save and add picture
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(0.5), Inches(3.2), width=Inches(15))
     plt.close(fig)
 
     # --- Slide 3: Cumulative Customers (Quarterly Table & Chart) ---
@@ -128,7 +144,12 @@ def create_product_presentation(product_name, data):
     sns.barplot(data=df_cumulative_melted, x='index', y='Count', hue='Customer Type', ax=ax, palette='magma')
     ax.set_title("Chart 2: Cumulative Customers per Quarter")
     ax.tick_params(axis='x', rotation=90, labelsize=8)
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(0.5), Inches(3.2), width=Inches(15))
+
+    # Correct way to save and add picture
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(0.5), Inches(3.2), width=Inches(15))
     plt.close(fig)
 
     # --- Slide 4: Assumptions (Tables 4 & 5) ---
