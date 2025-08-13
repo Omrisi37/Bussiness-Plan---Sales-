@@ -91,43 +91,53 @@ def create_product_presentation(product_name, data):
 
     # --- Slide 1: Lead Plan (Quarterly Table & Yearly Chart) ---
     slide = prs.slides.add_slide(blank_slide_layout)
-    # Table (Quarterly)
     df_leads.name = "Table 0: Recommended Lead Contact Plan (Quarterly)"
     add_df_to_slide(slide, df_leads, Inches(0.5), Inches(0.2), Inches(15), Inches(2.5))
-    # Chart (Yearly)
+    
     yearly_leads_data = data['lead_plan'][data['lead_plan'].index.year != 2030]
     fig = create_yearly_bar_chart(yearly_leads_data, "Chart 0: Leads to Contact per Year", "")
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(3.2), width=Inches(14))
+    
+    # *** CORRECTED IMAGE SAVING PATTERN ***
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(1), Inches(3.2), width=Inches(14))
     plt.close(fig)
 
     # --- Slide 2: Acquired Customers (Quarterly Table & Yearly Chart) ---
     slide = prs.slides.add_slide(blank_slide_layout)
-    # Table (Quarterly)
     df_acquired.name = "Table 1: Acquired New Customers (Quarterly)"
     add_df_to_slide(slide, df_acquired, Inches(0.5), Inches(0.2), Inches(15), Inches(2.5))
-    # Chart (Yearly)
+    
     fig = create_yearly_bar_chart(data['acquired_customers_plan'], "Chart 1: Acquired New Customers per Year", "")
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(3.2), width=Inches(14))
+    
+    # *** CORRECTED IMAGE SAVING PATTERN ***
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(1), Inches(3.2), width=Inches(14))
     plt.close(fig)
 
     # --- Slide 3: Cumulative Customers (Quarterly Table & Yearly Chart) ---
     slide = prs.slides.add_slide(blank_slide_layout)
-    # Table (Quarterly)
     df_cumulative.name = "Table 2: Cumulative Customers (Quarterly)"
     add_df_to_slide(slide, df_cumulative, Inches(0.5), Inches(0.2), Inches(15), Inches(2.5))
-    # Chart (Yearly, using the last value of each year)
+    
     fig = create_yearly_bar_chart(data['cumulative_customers'], "Chart 2: Cumulative Customers at Year End", "", is_cumulative=True)
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(3.2), width=Inches(14))
+    
+    # *** CORRECTED IMAGE SAVING PATTERN ***
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, Inches(1), Inches(3.2), width=Inches(14))
     plt.close(fig)
 
     # --- Slide 4: Assumptions (Tables 4 & 5) ---
     slide = prs.slides.add_slide(blank_slide_layout)
     slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Underlying Assumptions"
-    # Table 4
     df_tons = data['tons_per_customer'].T
     df_tons.name = "Table 4: Annual Tons per Single Customer"
     add_df_to_slide(slide, df_tons.style.format("{:,.2f}").data, Inches(0.5), Inches(1), Inches(15), Inches(2.5), font_size=12)
-    # Table 5
     df_pen = (data['pen_rate_df'] * 100).T
     df_pen.name = "Table 5: Generated Penetration Rates (%)"
     add_df_to_slide(slide, df_pen.style.format("{:,.1f}%").data, Inches(0.5), Inches(4), Inches(15), Inches(2.5), font_size=12)
