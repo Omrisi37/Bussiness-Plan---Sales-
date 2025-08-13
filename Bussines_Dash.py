@@ -220,7 +220,7 @@ def deserialize_from_firestore(value):
 
 # --- Session State Initialization ---
 if 'products' not in st.session_state:
-    st.session_state.products = ["Plant Based", "Egg Replacement", "Baking"]
+    st.session_state.products = ["Plant Based", "Baking"]
 if 'results' not in st.session_state:
     st.session_state.results = {}
 
@@ -622,7 +622,7 @@ with st.sidebar:
             product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=st.session_state.get(f'tt_g_{product}', 536.0), key=f'tt_g_{product}')
         with st.expander(f"3. Revenue Targets & Sales Strategy", expanded=False):
             st.markdown("**Target Annual Revenue ($)**")
-            default_revenues = [300000, 2700000, 5500000, 12000000, 32000000, 40000000]
+            default_revenues = [250000, 2700000, 5500000, 12000000, 32000000, 40000000]
             rev_targets = []
             for i in range(6):
                 actual_year = MODEL_START_YEAR + i
@@ -630,9 +630,9 @@ with st.sidebar:
                 default_val = st.session_state.get(key, default_revenues[i])
                 rev_slider_val = st.slider(
                     f'Target for {actual_year}:', 
-                    0, 50_000_000, 
+                    0, 100_000_000, 
                     default_val, 
-                    100000, 
+                    200000, 
                     format="$%d", 
                     key=key
                 )
