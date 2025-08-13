@@ -9,10 +9,128 @@ from google.oauth2 import service_account
 from google.cloud import firestore
 import base64
 import json
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
+
+
+# הוסף את שתי הפונקציות החדשות האלה יחד עם שאר הפונקציות
+def add_df_to_slide(slide, df, left, top, width, height):
+    """
+    Helper function to add a pandas DataFrame to a PowerPoint slide.
+    """
+    rows, cols = df.shape
+    rows += 1 # Add a row for the header
+    table_shape = slide.shapes.add_table(rows, cols, left, top, width, height)
+    table = table_shape.table
+
+    # Set column widths (optional, but can improve layout)
+    for i in range(cols):
+        table.columns[i].width = Inches(width.inches / cols)
+
+    # Write table headers
+    for i, col_name in enumerate(df.columns):
+        cell = table.cell(0, i)
+        cell.text = str(col_name)
+        cell.text_frame.paragraphs[0].font.bold = True
+        cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+
+    # Write table data
+    for r in range(rows - 1):
+        for c in range(cols):
+            cell = table.cell(r + 1, c)
+            cell.text = str(df.iloc[r, c])
+            # Optional: format numbers, etc.
+            cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+
+def to_powerpoint(results_dict):
+    """
+    Generates a PowerPoint presentation from the results dictionary.
+    """
+    prs = Presentation()
+    
+    # Set a widescreen layout
+    prs.slide_width = Inches(16)
+    prs.slide_height = Inches(9)
+
+    # Title slide
+    title_slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(title_slide_layout)
+    title = slide.shapes.title
+    subtitle = slide.placeholders[1]
+    title.text = "Business Plan Analysis Report"
+    subtitle.text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
+
+    # Layout for content slides
+    content_slide_layout = prs.slide_layouts[5] # Blank slide layout
+
+    for product_name, data in results_dict.items():
+        if product_name == 'summary':
+            continue
+
+        # --- Add a title slide for the product ---
+        product_title_slide_layout = prs.slide_layouts[1]
+        slide = prs.slides.add_slide(product_title_slide_layout)
+        title = slide.shapes.title
+        title.text = f"Analysis for: {product_name}"
+
+        # --- Add Chart 0: Lead Plan ---
+        slide = prs.slides.add_slide(content_slide_layout)
+        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
+        title.text_frame.text = "Chart 0: Yearly Lead Contact Plan"
+        
+        leads_data_full = data["lead_plan"]
+        leads_data_filtered = leads_data_full[leads_data_full.index.year != 2030]
+        fig = create_yearly_bar_chart(leads_data_filtered, "", "") # No title needed in the image itself
+        
+        img_buffer = io.BytesIO()
+        fig.savefig(img_buffer, format='png', dpi=300)
+        img_buffer.seek(0)
+        
+        slide.shapes.add_picture(img_buffer, Inches(1), Inches(1), width=Inches(14))
+        plt.close(fig) # Close the figure to free memory
+
+        # --- Add Table 1: Acquired Customers ---
+        slide = prs.slides.add_slide(content_slide_layout)
+        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
+        title.text_frame.text = "Table 1: Acquired New Customers per Quarter"
+        
+        df_acquired = data['acquired_customers_plan'].T
+        df_acquired.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired.columns]
+        add_df_to_slide(slide, df_acquired.reset_index(), Inches(0.5), Inches(1), Inches(15), Inches(4))
+
+        # --- Add Chart 3: Revenue ---
+        slide = prs.slides.add_slide(content_slide_layout)
+        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8))
+        title.text_frame.text = "Chart: Target vs. Actual Annual Revenue"
+        
+        validation_df = data['validation_df']
+        plot_df = validation_df.reset_index()
+        plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
+        
+        fig, ax = plt.subplots(figsize=(14, 7))
+        sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
+        for container in ax.containers:
+            ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9)
+        
+        img_buffer = io.BytesIO()
+        fig.savefig(img_buffer, format='png', dpi=300)
+        img_buffer.seek(0)
+        
+        slide.shapes.add_picture(img_buffer, Inches(1), Inches(1), width=Inches(14))
+        plt.close(fig)
+
+    # Save the presentation to an in-memory buffer
+    ppt_buffer = io.BytesIO()
+    prs.save(ppt_buffer)
+    ppt_buffer.seek(0)
+    
+    return ppt_buffer.getvalue()
 
 # =========================
 # פונקציות המרה ל/מ Firestore
@@ -611,6 +729,8 @@ if st.session_state.results:
         st.pyplot(fig_sum)
     # --- הכנת האקסל וכפתור ההורדה ---
     # כל הקוד הזה נמצא בתוך בלוק ה-if הראשי
+    # --- הכנת קבצים להורדה וכפתורים ---
+    # כל הקוד הזה נמצא בתוך בלוק ה-if הראשי
     excel_results_to_pass = {}
     for prod_name, res_data in results.items():
         excel_results_to_pass[prod_name] = res_data.copy()
@@ -620,11 +740,31 @@ if st.session_state.results:
         "summary_customers_raw": summary_customers_total_q_raw
     }
     
+    # יצירת נתונים עבור שני הקבצים
     excel_data = to_excel({**excel_results_to_pass, "summary": summary_for_excel})
-    
-    # הצג את כפתור ההורדה רק אם הנתונים לא ריקים
-    if excel_data:
-        st.download_button(label="📥 Download Full Report to Excel", data=excel_data, file_name="Business_Plan_Full_Report.xlsx")
+    ppt_data = to_powerpoint(results) # קריאה לפונקציה החדשה
+
+    # יצירת שתי עמודות לכפתורים
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # הצג את כפתור הורדת האקסל רק אם הנתונים לא ריקים
+        if excel_data:
+            st.download_button(
+                label="📥 Download Full Report to Excel", 
+                data=excel_data, 
+                file_name="Business_Plan_Full_Report.xlsx",
+                use_container_width=True
+            )
+    with col2:
+        # הצג את כפתור הורדת המצגת רק אם הנתונים לא ריקים
+        if ppt_data:
+            st.download_button(
+                label="📊 Download Presentation",
+                data=ppt_data,
+                file_name="Business_Plan_Presentation.pptx",
+                use_container_width=True
+            )
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
