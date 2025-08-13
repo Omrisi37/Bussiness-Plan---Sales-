@@ -736,7 +736,7 @@ if st.session_state.results:
                         colors=colors,
                         startangle=90,
                         wedgeprops=dict(width=0.4, edgecolor='w'),
-                        textprops={'fontsize': 11}
+                        textprops={'fontsize': 8}
                     )
                     
                     ax_pie.set_title(f"Customer Mix & YTD Revenue Contribution for {selected_quarter.year}-Q{selected_quarter.quarter}", fontsize=16, weight='bold')
