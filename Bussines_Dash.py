@@ -661,24 +661,83 @@ if st.session_state.results:
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # ... (כל קוד התצוגה של הטבלאות והגרפים שכבר קיים) ...
-            # (השארתי אותו מקוצר כדי לא להעמיס, אבל הוא צריך להיות כאן)
-            st.subheader("Lead Generation")
+            # --- סינון התוצאות הרבעוניות לפני ההצגה ---
             leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
+            acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
+            cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
+
+            # --- טבלה 0 + גרף 0 ---
+            st.subheader("Lead Generation")
+            st.markdown("#### Table 0: Recommended Lead Contact Plan")
             lead_plan_display_T = leads_to_display.T
             lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
             st.dataframe(lead_plan_display_T.style.format("{:d}"))
+
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
             leads_for_chart0 = leads_to_display[leads_to_display.index.year != 2030]
             fig0 = create_yearly_bar_chart(df_quarterly=leads_for_chart0, title=f"Leads to Contact per Year - {product_name}", y_axis_label="Number of Leads to Contact")
             st.pyplot(fig0)
-            # ... וכן הלאה לשאר הטבלאות והגרפים ...
-
             st.markdown("---")
-            # --- כפתורי הורדה ספציפיים למוצר ---
+
+            # --- טבלה 1 + גרף 1 ---
+            st.subheader("Action Plan & Outcomes")
+            st.markdown("#### Table 1: Acquired New Customers per Quarter")
+            acquired_customers_display_T = acquired_to_display.T
+            acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
+            st.dataframe(acquired_customers_display_T.style.format("{:d}"))
+
+            st.markdown("##### Chart 1: Yearly Acquired New Customers")
+            fig1 = create_yearly_bar_chart(df_quarterly=acquired_to_display, title=f"Acquired New Customers per Year - {product_name}", y_axis_label="Number of New Customers")
+            st.pyplot(fig1)
+            st.markdown("---")
+
+            # --- טבלה 2 + גרף 2 ---
+            st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
+            cum_cust_display_T = cumulative_to_display.T
+            cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
+            st.dataframe(cum_cust_display_T.style.format("{:,d}"))
+
+            st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
+            fig2 = create_yearly_bar_chart(df_quarterly=cumulative_to_display, title=f"Cumulative Customers at Year End - {product_name}", y_axis_label="Total Number of Customers", is_cumulative=True)
+            st.pyplot(fig2)
+            st.markdown("---")
+            
+            # --- שאר התוצאות (טבלה 3, גרף הכנסות וכו') ---
+            validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
+            validation_df.index.name = "Year"
+            results[product_name]['validation_df'] = validation_df
+            
+            st.markdown("#### Table 3: Target vs. Actual Revenue")
+            st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
+            
+            st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
+            plot_df = validation_df.reset_index()
+            plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
+            
+            fig, ax = plt.subplots(figsize=(14, 7))
+            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
+            ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=18, weight='bold')
+            ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
+            ax.set_xlabel("Year", fontsize=12)
+            ax.set_ylabel("Revenue", fontsize=12)
+            for container in barplot.containers:
+                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
+            st.pyplot(fig)
+            
+            with st.expander("View Underlying Assumptions"):
+                tons_per_customer_df = results[product_name].get('tons_per_customer')
+                pen_rate_df = results[product_name].get('pen_rate_df')
+                if tons_per_customer_df is not None:
+                    st.markdown("#### Table 4: Annual Tons per Single Customer (Target-Driven)")
+                    st.dataframe(tons_per_customer_df.T.style.format("{:,.2f}"))
+                if pen_rate_df is not None:
+                    st.markdown("#### Table 5: Generated Penetration Rates to Meet Target (%)")
+                    st.dataframe((pen_rate_df.T*100).style.format("{:,.1f}%"))
+            
+            st.markdown("---")
+            # --- START: Download buttons for this tab ---
             col1, col2 = st.columns(2)
             with col1:
-                # הכנת נתוני אקסל רק למוצר הזה
                 excel_product_data = to_excel({product_name: results[product_name]})
                 if excel_product_data:
                     st.download_button(
@@ -688,7 +747,6 @@ if st.session_state.results:
                         use_container_width=True
                     )
             with col2:
-                # הכנת נתוני מצגת רק למוצר הזה
                 ppt_product_data = create_product_presentation(product_name, results[product_name])
                 if ppt_product_data:
                     st.download_button(
@@ -697,26 +755,43 @@ if st.session_state.results:
                         file_name=f"{product_name}_Presentation.pptx",
                         use_container_width=True
                     )
-
+            # --- END: Download buttons for this tab ---
 
     # --- לשונית הסיכום הכללי ---
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
-        # חישוב נתוני הסיכום (כמו שהיה קודם)
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
 
-        # ... (כל קוד התצוגה של טבלאות וגרפי הסיכום, כפי שהיה) ...
         summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
-        # ... וכן הלאה ...
+        
+        summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
+        summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
+        st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
+        st.dataframe(summary_customers_display_T.style.format("{:,d}"))
+        
+        st.markdown("#### Chart: Total Revenue Breakdown by Product")
+        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
+        summary_plot_df = pd.DataFrame(all_revenues)
+        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+        fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
+        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
+        for container in ax_sum.containers:
+            ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
+        ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
+        ax_sum.set_ylabel('Revenue ($)', fontsize=12)
+        ax_sum.set_xlabel('Year', fontsize=12)
+        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
+        ax_sum.tick_params(axis='x', rotation=0)
+        st.pyplot(fig_sum)
 
         st.markdown("---")
-        # --- כפתורי הורדה ספציפיים לסיכום ---
+        # --- START: Download buttons for the summary tab ---
         col1, col2 = st.columns(2)
         summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
         with col1:
@@ -737,7 +812,7 @@ if st.session_state.results:
                     file_name="Overall_Summary_Presentation.pptx",
                     use_container_width=True
                 )
-
+        # --- END: Download buttons for the summary tab ---
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
