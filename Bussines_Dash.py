@@ -654,47 +654,49 @@ if st.session_state.results:
     
     display_start_date = pd.Timestamp('2025-07-01')
 
+    # --- לולאה להצגת התוצאות בכל לשונית של מוצר ---
     for i, product_name in enumerate(product_list):
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # ... (קוד תצוגה קיים) ...
             leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= display_start_date]
             acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= display_start_date]
             cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= display_start_date]
+            
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
             lead_plan_display_T = leads_to_display.T
             lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
             st.dataframe(lead_plan_display_T.style.format("{:d}"))
+            
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
             leads_for_chart0 = leads_to_display[leads_to_display.index.year != 2030]
             fig0 = create_yearly_bar_chart(df_quarterly=leads_for_chart0, title=f"Leads to Contact per Year - {product_name}", y_axis_label="Number of Leads to Contact")
             st.pyplot(fig0)
             st.markdown("---")
+            
             st.subheader("Action Plan & Outcomes")
             st.markdown("#### Table 1: Acquired New Customers per Quarter")
             acquired_customers_display_T = acquired_to_display.T
             acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
             st.dataframe(acquired_customers_display_T.style.format("{:d}"))
+            
             st.markdown("##### Chart 1: Yearly Acquired New Customers")
             fig1 = create_yearly_bar_chart(df_quarterly=acquired_to_display, title=f"Acquired New Customers per Year - {product_name}", y_axis_label="Number of New Customers")
             st.pyplot(fig1)
             st.markdown("---")
+            
             st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
             cum_cust_display_T = cumulative_to_display.T
             cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
             st.dataframe(cum_cust_display_T.style.format("{:,d}"))
+            
             st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
             fig2 = create_yearly_bar_chart(df_quarterly=cumulative_to_display, title=f"Cumulative Customers at Year End - {product_name}", y_axis_label="Total Number of Customers", is_cumulative=True)
             st.pyplot(fig2)
 
-            # =======================================================
-            #        *** START OF PIE CHART FEATURE - UPDATED ***
-            # =======================================================
             st.markdown("---")
             st.subheader("Interactive Analysis: Customer & Revenue Mix per Quarter")
-
             quarter_options = results[product_name]['cumulative_customers'].index
             selected_quarter = st.selectbox(
                 "Select a Quarter to Analyze",
@@ -702,17 +704,12 @@ if st.session_state.results:
                 format_func=lambda d: f"{d.year}-Q{d.quarter}",
                 key=f'pie_select_{product_name}'
             )
-
             if selected_quarter:
                 cust_data_for_quarter = results[product_name]['cumulative_customers'].loc[selected_quarter]
                 rev_data_for_quarter = results[product_name]['revenue_per_segment_q'].loc[selected_quarter]
-                
                 non_zero_cust_data = cust_data_for_quarter[cust_data_for_quarter > 0]
-
                 if not non_zero_cust_data.empty:
                     fig_pie, ax_pie = plt.subplots(figsize=(12, 7))
-                    
-                    # --- NEW: Create combined labels ---
                     total_customers = non_zero_cust_data.sum()
                     pie_labels = []
                     for segment, count in non_zero_cust_data.items():
@@ -720,28 +717,20 @@ if st.session_state.results:
                         revenue = rev_data_for_quarter[segment]
                         rev_text = f"${revenue/1_000_000:.2f}M" if revenue >= 1_000_000 else f"${revenue/1_000:,.0f}K"
                         pie_labels.append(f"{segment}\n{percentage:.1f}%\n({rev_text})")
-
-                    # --- NEW: Define a nicer color palette ---
                     colors = sns.color_palette('crest', n_colors=len(non_zero_cust_data))
-
                     wedges, texts = ax_pie.pie(
                         non_zero_cust_data,
                         labels=pie_labels,
-                        colors=colors, # Use new colors
+                        colors=colors,
                         startangle=90,
                         wedgeprops=dict(width=0.4, edgecolor='w'),
-                        textprops={'fontsize': 12} # Control label font size
+                        textprops={'fontsize': 12}
                     )
-                    
                     ax_pie.set_title(f"Customer & Revenue Mix for {selected_quarter.year}-Q{selected_quarter.quarter}", fontsize=16, weight='bold')
                     st.pyplot(fig_pie)
                 else:
                     st.info(f"No cumulative customers found for {selected_quarter.year}-Q{selected_quarter.quarter}.")
-            # =======================================================
-            #         *** END OF PIE CHART FEATURE - UPDATED ***
-            # =======================================================
 
-            # ... (The rest of the display code) ...
             st.markdown("---")
             validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
             validation_df.index.name = "Year"
@@ -780,55 +769,47 @@ if st.session_state.results:
                 if ppt_product_data:
                     st.download_button(label=f"📊 Download {product_name} Presentation", data=ppt_product_data, file_name=f"{product_name}_Presentation.pptx", use_container_width=True)
 
-            with tabs[-1]:
-            st.header("Overall Summary (All Products)")
-            
-            summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
-            summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
-            summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
-            summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
-            summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
-            st.markdown("#### Summary: Total Revenue per Year")
-            st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
-            summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
-            summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
-            st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
-            st.dataframe(summary_customers_display_T.style.format("{:,d}"))
-            
-            st.markdown("#### Chart: Total Revenue Breakdown by Product")
-            
-            all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
-            summary_plot_df = pd.DataFrame(all_revenues)
-            summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-            fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
+    # --- לשונית הסיכום הכללי ---
+    with tabs[-1]:
+        st.header("Overall Summary (All Products)")
         
-            # =======================================================
-            #               *** START OF FIX ***
-            # =======================================================
-            summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
-            # =======================================================
-            #               *** END OF FIX ***
-            # =======================================================
+        summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
+        summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
+        summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
+        summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
+        summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= display_start_date]
+        st.markdown("#### Summary: Total Revenue per Year")
+        st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
+        summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
+        summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
+        st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
+        st.dataframe(summary_customers_display_T.style.format("{:,d}"))
         
-            for container in ax_sum.containers:
-                ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
-            ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
-            ax_sum.set_ylabel('Revenue ($)', fontsize=12)
-            ax_sum.set_xlabel('Year', fontsize=12)
-            ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-            ax_sum.tick_params(axis='x', rotation=0)
-            st.pyplot(fig_sum)
-            st.markdown("---")
-            col1, col2 = st.columns(2)
-            summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
-            with col1:
-                excel_summary_data = to_excel({"summary": summary_for_excel})
-                if excel_summary_data:
-                     st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
-            with col2:
-                ppt_summary_data = create_summary_presentation(summary_for_excel, results)
-                if ppt_summary_data:
-                    st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
-            
+        st.markdown("#### Chart: Total Revenue Breakdown by Product")
+        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
+        summary_plot_df = pd.DataFrame(all_revenues)
+        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+        fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
+        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
+        for container in ax_sum.containers:
+            ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
+        ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
+        ax_sum.set_ylabel('Revenue ($)', fontsize=12)
+        ax_sum.set_xlabel('Year', fontsize=12)
+        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
+        ax_sum.tick_params(axis='x', rotation=0)
+        st.pyplot(fig_sum)
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
+        with col1:
+            excel_summary_data = to_excel({"summary": summary_for_excel})
+            if excel_summary_data:
+                 st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
+        with col2:
+            ppt_summary_data = create_summary_presentation(summary_for_excel, results)
+            if ppt_summary_data:
+                st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
+
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
