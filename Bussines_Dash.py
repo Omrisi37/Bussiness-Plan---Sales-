@@ -18,27 +18,30 @@ st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 
 
-# מחק את add_df_to_slide ו-to_powerpoint הקיימות, והדבק את אלה במקומן
+def add_fig_to_slide(slide, fig, left, top, width):
+    """
+    Saves a matplotlib figure to a buffer and adds it correctly and safely to a slide.
+    This helper function prevents the UnidentifiedImageError.
+    """
+    img_buffer = io.BytesIO()
+    fig.savefig(img_buffer, format='png', bbox_inches='tight')
+    img_buffer.seek(0)
+    slide.shapes.add_picture(img_buffer, left, top, width=width)
+    plt.close(fig) # Close the figure to free up memory
 
 def add_df_to_slide(slide, df, left, top, width, height, font_size=9):
     """
     Helper function to add a pandas DataFrame to a PowerPoint slide with better formatting.
     """
-    # הוספת כותרת לטבלה מעל הטבלה עצמה
     df_title = df.name if hasattr(df, 'name') else "Data Table"
     slide.shapes.add_textbox(left, top, width, Inches(0.4)).text_frame.text = df_title
-    top += Inches(0.4) # הזזת הטבלה למטה
-
+    top += Inches(0.4)
     rows, cols = df.shape
-    rows += 1 # Add a row for the header
+    rows += 1
     table_shape = slide.shapes.add_table(rows, cols, left, top, width, height)
     table = table_shape.table
-
-    # Set column widths to be equal
     for i in range(cols):
         table.columns[i].width = Inches(width.inches / cols)
-
-    # Write table headers and format them
     for i, col_name in enumerate(df.columns):
         cell = table.cell(0, i)
         cell.text = str(col_name)
@@ -46,12 +49,9 @@ def add_df_to_slide(slide, df, left, top, width, height, font_size=9):
         p.font.bold = True
         p.font.size = Pt(font_size)
         p.alignment = PP_ALIGN.CENTER
-
-    # Write table data and format it
     for r in range(rows - 1):
         for c in range(cols):
             cell = table.cell(r + 1, c)
-            # Format numbers to have commas
             value = df.iloc[r, c]
             if isinstance(value, (int, float)):
                 cell.text = f"{value:,.0f}"
@@ -60,65 +60,52 @@ def add_df_to_slide(slide, df, left, top, width, height, font_size=9):
             p = cell.text_frame.paragraphs[0]
             p.font.size = Pt(font_size - 1)
             p.alignment = PP_ALIGN.CENTER
-            
     return table_shape
 
 def create_product_presentation(product_name, data):
     """
-    Generates a PowerPoint for a single product.
-    - New Layout: Separate slide for YEARLY chart and separate slide for QUARTERLY table.
+    Generates a PowerPoint for a single product using the new safe helper functions.
     """
     prs = Presentation()
     prs.slide_width = Inches(16)
     prs.slide_height = Inches(9)
     blank_slide_layout = prs.slide_layouts[6]
-
-    # --- Title Slide ---
     title_slide_layout = prs.slide_layouts[0]
+
     slide = prs.slides.add_slide(title_slide_layout)
     slide.shapes.title.text = f"Business Plan Analysis: {product_name}"
     slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
     
-    # --- DataFrames Preparation (Quarterly for tables) ---
     df_leads_q = data['lead_plan'].T
     df_leads_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_leads_q.columns]
-    
     df_acquired_q = data['acquired_customers_plan'].T
     df_acquired_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired_q.columns]
-
     df_cumulative_q = data['cumulative_customers'].T
     df_cumulative_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_cumulative_q.columns]
 
     # --- Topic 1: Lead Plan ---
-    # Slide 1.1: Yearly Chart
     slide = prs.slides.add_slide(blank_slide_layout)
-    yearly_leads_data = data['lead_plan'][data['lead_plan'].index.year != 2030]
-    fig = create_yearly_bar_chart(yearly_leads_data, "Chart 0: Leads to Contact per Year", "")
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(1), width=Inches(14))
-    plt.close(fig)
-    # Slide 1.2: Quarterly Table
+    fig = create_yearly_bar_chart(data['lead_plan'][data['lead_plan'].index.year != 2030], "Chart 0: Leads to Contact per Year", "")
+    add_fig_to_slide(slide, fig, Inches(1), Inches(1), width=Inches(14))
+    
     slide = prs.slides.add_slide(blank_slide_layout)
     df_leads_q.name = "Table 0: Recommended Lead Contact Plan (Quarterly)"
     add_df_to_slide(slide, df_leads_q, Inches(0.5), Inches(0.2), Inches(15), Inches(3))
 
     # --- Topic 2: Acquired Customers ---
-    # Slide 2.1: Yearly Chart
     slide = prs.slides.add_slide(blank_slide_layout)
     fig = create_yearly_bar_chart(data['acquired_customers_plan'], "Chart 1: Acquired New Customers per Year", "")
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(1), width=Inches(14))
-    plt.close(fig)
-    # Slide 2.2: Quarterly Table
+    add_fig_to_slide(slide, fig, Inches(1), Inches(1), width=Inches(14))
+    
     slide = prs.slides.add_slide(blank_slide_layout)
     df_acquired_q.name = "Table 1: Acquired New Customers (Quarterly)"
     add_df_to_slide(slide, df_acquired_q, Inches(0.5), Inches(0.2), Inches(15), Inches(3))
 
     # --- Topic 3: Cumulative Customers ---
-    # Slide 3.1: Yearly Chart
     slide = prs.slides.add_slide(blank_slide_layout)
     fig = create_yearly_bar_chart(data['cumulative_customers'], "Chart 2: Cumulative Customers at Year End", "", is_cumulative=True)
-    slide.shapes.add_picture(io.BytesIO(fig.savefig(io.BytesIO(), format='png', bbox_inches='tight')), Inches(1), Inches(1), width=Inches(14))
-    plt.close(fig)
-    # Slide 3.2: Quarterly Table
+    add_fig_to_slide(slide, fig, Inches(1), Inches(1), width=Inches(14))
+
     slide = prs.slides.add_slide(blank_slide_layout)
     df_cumulative_q.name = "Table 2: Cumulative Customers (Quarterly)"
     add_df_to_slide(slide, df_cumulative_q, Inches(0.5), Inches(0.2), Inches(15), Inches(3))
@@ -133,21 +120,19 @@ def create_product_presentation(product_name, data):
     df_pen.name = "Table 5: Generated Penetration Rates (%)"
     add_df_to_slide(slide, df_pen.style.format("{:,.1f}%").data, Inches(0.5), Inches(4), Inches(15), Inches(2.5), font_size=12)
 
-    # --- Save to buffer ---
     ppt_buffer = io.BytesIO()
     prs.save(ppt_buffer)
     ppt_buffer.seek(0)
     return ppt_buffer.getvalue()
 
 def create_summary_presentation(summary_data, all_results):
-    """Generates a PowerPoint presentation for the overall summary."""
+    """Generates a PowerPoint for the overall summary using the new safe helper functions."""
     prs = Presentation()
     prs.slide_width = Inches(16)
     prs.slide_height = Inches(9)
     blank_slide_layout = prs.slide_layouts[6]
-
-    # --- Title Slide ---
     title_slide_layout = prs.slide_layouts[0]
+
     slide = prs.slides.add_slide(title_slide_layout)
     slide.shapes.title.text = "Overall Summary Report"
     slide.placeholders[1].text = f"Generated on: {pd.Timestamp.now().strftime('%d/%m/%Y')}"
@@ -155,24 +140,16 @@ def create_summary_presentation(summary_data, all_results):
     # --- Slide 1: Revenue Breakdown Chart ---
     slide = prs.slides.add_slide(blank_slide_layout)
     slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(15), Inches(0.8)).text_frame.text = "Total Revenue Breakdown by Product"
-    
     product_list = [p for p in all_results.keys() if p != 'summary']
     all_revenues = {p: all_results[p]['annual_revenue'] for p in product_list}
     summary_plot_df = pd.DataFrame(all_revenues)
     summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-    
     fig, ax = plt.subplots(figsize=(12, 6))
     barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax, palette="rocket_r")
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-
-    # *** FIXED: Added color and fontweight to ensure visibility ***
     for container in barplot.containers:
         ax.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
-    
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format='png', bbox_inches='tight')
-    slide.shapes.add_picture(img_buffer, Inches(1), Inches(1.2), width=Inches(14))
-    plt.close(fig)
+    add_fig_to_slide(slide, fig, Inches(1), Inches(1.2), width=Inches(14))
     
     # --- Slide 2: Cumulative Customers Table ---
     slide = prs.slides.add_slide(blank_slide_layout)
@@ -181,7 +158,6 @@ def create_summary_presentation(summary_data, all_results):
     df_summary_cust.name = "Total Cumulative Customers (Quarterly)"
     add_df_to_slide(slide, df_summary_cust, Inches(0.5), Inches(1.5), Inches(15), Inches(2))
 
-    # --- Save to buffer ---
     ppt_buffer = io.BytesIO()
     prs.save(ppt_buffer)
     ppt_buffer.seek(0)
