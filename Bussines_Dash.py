@@ -718,7 +718,7 @@ if st.session_state.results:
 
                 if not non_zero_cust_data.empty:
                     # --- CHANGED: Reduced figsize for a smaller chart ---
-                    fig_pie, ax_pie = plt.subplots(figsize=(9, 6))
+                    fig_pie, ax_pie = plt.subplots(figsize=(6, 4))
                     
                     total_customers = non_zero_cust_data.sum()
                     pie_labels = []
