@@ -11,3 +11,4 @@ protobuf>=4.25.1
 python-dateutil>=2.8.2
 pytz>=2024.1
 python-pptx
+weasyprint
