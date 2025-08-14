@@ -31,66 +31,97 @@ def fig_to_base64_uri(fig):
 
 # הפונקציה הראשית ליצירת ה-PDF
 def to_pdf(results_dict):
-    # --- 1. הגדרת עיצוב (CSS) ---
+    # --- 1. הגדרת עיצוב (CSS) משופר ---
     html_style = """
     <style>
         @page { size: A4 portrait; margin: 1cm; }
         body { font-family: Arial, sans-serif; }
         h1, h2, h3 { color: #003366; border-bottom: 2px solid #003366; padding-bottom: 5px;}
-        h1 { font-size: 24pt; text-align: center; }
-        h2 { font-size: 18pt; }
+        h1 { font-size: 24pt; text-align: center; margin-bottom: 40px;}
+        h2 { font-size: 18pt; margin-top: 50px;}
         h3 { font-size: 14pt; color: #335577; border-bottom: 1px solid #cccccc;}
         table { border-collapse: collapse; width: 100%; margin-top: 15px; margin-bottom: 25px; }
-        th, td { border: 1px solid #dddddd; text-align: center; padding: 6px; font-size: 9pt;}
+        th, td { border: 1px solid #dddddd; text-align: center; padding: 4px; font-size: 9pt;}
         th { background-color: #f2f2f2; font-weight: bold; }
+        /* --- NEW: Special class for very wide tables to shrink font --- */
+        .wide-table th, .wide-table td { font-size: 7pt; }
         img { max-width: 100%; height: auto; display: block; margin-left: auto; margin-right: auto; margin-top: 15px; margin-bottom: 25px; }
-        .page-break { page-break-after: always; }
+        .page-break { page-break-before: always; }
     </style>
     """
 
     # --- 2. בניית גוף ה-HTML ---
     html_body = f"<h1>Business Plan Analysis Report</h1><p style='text-align:center;'>Generated on: {pd.Timestamp.now(tz='Asia/Jerusalem').strftime('%d/%m/%Y')}</p>"
     
+    product_list = [p for p in results_dict.keys() if p != 'summary']
+
     # --- תוכן עבור כל מוצר ---
-    for product_name, data in results_dict.items():
-        if product_name == 'summary': continue
-        
+    for product_name in product_list:
+        data = results_dict[product_name]
         html_body += f"<div class='page-break'></div><h2>Analysis for: {product_name}</h2>"
         
-        # טבלה 0
-        df_leads = data['lead_plan'].T
-        df_leads.columns = [f"{c.year}-Q{c.quarter}" for c in df_leads.columns]
-        html_body += "<h3>Table 0: Recommended Lead Contact Plan</h3>" + df_leads.to_html(classes='dataframe')
+        # Helper lambda to convert quarterly df to html with wide-table class
+        to_wide_html = lambda df, title: f"<h3>{title}</h3>" + df.to_html(classes='wide-table dataframe')
+
+        # טבלאות וגרפים 0-2 (עם סינון תאריכים כמו באפליקציה)
+        lead_display_start_date = pd.Timestamp('2025-01-01')
+        main_display_start_date = pd.Timestamp('2026-01-01')
         
-        # גרף 0
+        df_leads_q = data['lead_plan'][data['lead_plan'].index >= lead_display_start_date].T
+        df_leads_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_leads_q.columns]
+        html_body += to_wide_html(df_leads_q, "Table 0: Recommended Lead Contact Plan")
         fig0 = create_yearly_bar_chart(data["lead_plan"][data["lead_plan"].index.year != 2030], "", "")
         html_body += f"<img src='{fig_to_base64_uri(fig0)}'>"
+
+        df_acquired_q = data['acquired_customers_plan'][data['acquired_customers_plan'].index >= main_display_start_date].T
+        df_acquired_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired_q.columns]
+        html_body += to_wide_html(df_acquired_q, "Table 1: Acquired New Customers per Quarter")
+        fig1 = create_yearly_bar_chart(data['acquired_customers_plan'], "", "")
+        html_body += f"<img src='{fig_to_base64_uri(fig1)}'>"
+
+        df_cum_q = data['cumulative_customers'][data['cumulative_customers'].index >= main_display_start_date].T
+        df_cum_q.columns = [f"{c.year}-Q{c.quarter}" for c in df_cum_q.columns]
+        html_body += to_wide_html(df_cum_q, "Table 2: Cumulative Number of Customers")
+        fig2 = create_yearly_bar_chart(data['cumulative_customers'], "", "", is_cumulative=True)
+        html_body += f"<img src='{fig_to_base64_uri(fig2)}'>"
         
-        # טבלה 1
-        df_acquired = data['acquired_customers_plan'].T
-        df_acquired.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired.columns]
-        html_body += "<h3>Table 1: Acquired New Customers per Quarter</h3>" + df_acquired.to_html(classes='dataframe')
+        # טבלה וגרף 3
+        html_body += "<h3>Table 3: Target vs. Actual Revenue</h3>" + data['validation_df'].to_html(classes='dataframe')
+        plot_df_melted = data['validation_df'].reset_index().melt(id_vars='Year', var_name='Type', value_name='Revenue')
+        fig3, ax3 = plt.subplots(figsize=(10, 5))
+        sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax3, palette="mako")
+        for c in ax3.containers: ax3.bar_label(c, fmt='${:,.0f}', padding=3, fontsize=8)
+        html_body += f"<img src='{fig_to_base64_uri(fig3)}'>"
         
-        # ... אפשר להוסיף עוד טבלאות וגרפים כאן באותה צורה ...
+        # טבלאות 4 ו-5
+        html_body += "<div class='page-break'></div><h3>Underlying Assumptions</h3>"
+        html_body += "<h4>Table 4: Annual Tons per Single Customer</h4>" + data['tons_per_customer'].to_html(classes='dataframe')
+        html_body += "<h4>Table 5: Generated Penetration Rates (%)</h4>" + (data['pen_rate_df'] * 100).to_html(classes='dataframe', float_format='{:.1f}%'.format)
 
     # --- תוכן עבור הסיכום הכללי ---
     summary_data = results_dict.get("summary", {})
     if summary_data:
         html_body += "<div class='page-break'></div><h2>Overall Summary</h2>"
+        
         # טבלת סיכום הכנסות
         html_body += "<h3>Total Revenue per Year</h3>" + summary_data["summary_revenue"].to_html(classes='dataframe')
+        
+        # --- NEW: Added Summary Cumulative Customers Table ---
+        summary_customers_to_display = summary_data["summary_customers_raw"][summary_data["summary_customers_raw"].index >= main_display_start_date].to_frame("Total Customers").T
+        summary_customers_to_display.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_to_display.columns]
+        html_body += to_wide_html(summary_customers_to_display, "Total Cumulative Customers (Quarterly)")
+
         # גרף סיכום הכנסות
-        product_list = [p for p in results_dict.keys() if p != 'summary']
         all_revenues = {p: results_dict[p]['annual_revenue'] for p in product_list}
         summary_plot_df = pd.DataFrame(all_revenues)
         summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-        fig_sum, ax_sum = plt.subplots(figsize=(10, 5)) # גודל מותאם ל-PDF
+        fig_sum, ax_sum = plt.subplots(figsize=(10, 5))
         summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
         for container in ax_sum.containers: ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=8, color='black', fontweight='bold')
         html_body += f"<img src='{fig_to_base64_uri(fig_sum)}'>"
 
     # --- 3. הרכבת ה-HTML המלא ויצירת ה-PDF ---
-    full_html = f"<!DOCTYPE html><html><head><title>Report</title>{html_style}</head><body>{html_body}</body></html>"
+    full_html = f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Report</title>{html_style}</head><body>{html_body}</body></html>"
     
     pdf_bytes = HTML(string=full_html).write_pdf()
     return pdf_bytes
