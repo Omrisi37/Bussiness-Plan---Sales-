@@ -12,12 +12,88 @@ import json
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
+from weasyprint import HTML
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 # --- Global Settings ---
 MODEL_START_YEAR = 2026
+
+# פונקציית עזר להמרת גרף לתמונה שניתן להטמיע ב-HTML
+def fig_to_base64_uri(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    base64_img = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close(fig) # סגירת הגרף לשחרור זיכרון
+    return f'data:image/png;base64,{base64_img}'
+
+# הפונקציה הראשית ליצירת ה-PDF
+def to_pdf(results_dict):
+    # --- 1. הגדרת עיצוב (CSS) ---
+    html_style = """
+    <style>
+        @page { size: A4 portrait; margin: 1cm; }
+        body { font-family: Arial, sans-serif; }
+        h1, h2, h3 { color: #003366; border-bottom: 2px solid #003366; padding-bottom: 5px;}
+        h1 { font-size: 24pt; text-align: center; }
+        h2 { font-size: 18pt; }
+        h3 { font-size: 14pt; color: #335577; border-bottom: 1px solid #cccccc;}
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; margin-bottom: 25px; }
+        th, td { border: 1px solid #dddddd; text-align: center; padding: 6px; font-size: 9pt;}
+        th { background-color: #f2f2f2; font-weight: bold; }
+        img { max-width: 100%; height: auto; display: block; margin-left: auto; margin-right: auto; margin-top: 15px; margin-bottom: 25px; }
+        .page-break { page-break-after: always; }
+    </style>
+    """
+
+    # --- 2. בניית גוף ה-HTML ---
+    html_body = f"<h1>Business Plan Analysis Report</h1><p style='text-align:center;'>Generated on: {pd.Timestamp.now(tz='Asia/Jerusalem').strftime('%d/%m/%Y')}</p>"
+    
+    # --- תוכן עבור כל מוצר ---
+    for product_name, data in results_dict.items():
+        if product_name == 'summary': continue
+        
+        html_body += f"<div class='page-break'></div><h2>Analysis for: {product_name}</h2>"
+        
+        # טבלה 0
+        df_leads = data['lead_plan'].T
+        df_leads.columns = [f"{c.year}-Q{c.quarter}" for c in df_leads.columns]
+        html_body += "<h3>Table 0: Recommended Lead Contact Plan</h3>" + df_leads.to_html(classes='dataframe')
+        
+        # גרף 0
+        fig0 = create_yearly_bar_chart(data["lead_plan"][data["lead_plan"].index.year != 2030], "", "")
+        html_body += f"<img src='{fig_to_base64_uri(fig0)}'>"
+        
+        # טבלה 1
+        df_acquired = data['acquired_customers_plan'].T
+        df_acquired.columns = [f"{c.year}-Q{c.quarter}" for c in df_acquired.columns]
+        html_body += "<h3>Table 1: Acquired New Customers per Quarter</h3>" + df_acquired.to_html(classes='dataframe')
+        
+        # ... אפשר להוסיף עוד טבלאות וגרפים כאן באותה צורה ...
+
+    # --- תוכן עבור הסיכום הכללי ---
+    summary_data = results_dict.get("summary", {})
+    if summary_data:
+        html_body += "<div class='page-break'></div><h2>Overall Summary</h2>"
+        # טבלת סיכום הכנסות
+        html_body += "<h3>Total Revenue per Year</h3>" + summary_data["summary_revenue"].to_html(classes='dataframe')
+        # גרף סיכום הכנסות
+        product_list = [p for p in results_dict.keys() if p != 'summary']
+        all_revenues = {p: results_dict[p]['annual_revenue'] for p in product_list}
+        summary_plot_df = pd.DataFrame(all_revenues)
+        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+        fig_sum, ax_sum = plt.subplots(figsize=(10, 5)) # גודל מותאם ל-PDF
+        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
+        for container in ax_sum.containers: ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=8, color='black', fontweight='bold')
+        html_body += f"<img src='{fig_to_base64_uri(fig_sum)}'>"
+
+    # --- 3. הרכבת ה-HTML המלא ויצירת ה-PDF ---
+    full_html = f"<!DOCTYPE html><html><head><title>Report</title>{html_style}</head><body>{html_body}</body></html>"
+    
+    pdf_bytes = HTML(string=full_html).write_pdf()
+    return pdf_bytes
 
 def add_fig_to_slide(slide, fig, left, top, width):
     """
@@ -840,16 +916,36 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
         st.markdown("---")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
+        
         with col1:
-            excel_summary_data = to_excel({"summary": summary_for_excel})
+            excel_summary_data = to_excel({"summary": summary_for_excel, **results})
             if excel_summary_data:
-                 st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
+                 st.download_button(
+                    label="📥 Download Summary to Excel",
+                    data=excel_summary_data,
+                    file_name="Overall_Summary_Report.xlsx",
+                    use_container_width=True
+                )
         with col2:
             ppt_summary_data = create_summary_presentation(summary_for_excel, results)
             if ppt_summary_data:
-                st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
+                st.download_button(
+                    label="📊 Download Summary Presentation",
+                    data=ppt_summary_data,
+                    file_name="Overall_Summary_Presentation.pptx",
+                    use_container_width=True
+                )
+        with col3:
+            pdf_data = to_pdf(results)
+            if pdf_data:
+                st.download_button(
+                    label="📄 Download Full PDF Report",
+                    data=pdf_data,
+                    file_name="Full_Analysis_Report.pdf",
+                    use_container_width=True
+                )
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
