@@ -912,7 +912,7 @@ if st.session_state.results:
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
-        # חישוב נתוני הסיכום
+        # חישוב נתוני סיכום
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
@@ -922,24 +922,47 @@ if st.session_state.results:
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
 
-        # =======================================================
-        #               *** START OF NEW FEATURE ***
-        #            הוספת טבלת הכנסות רבעונית לפי מוצר
-        # =======================================================
+        # טבלת הכנסות רבעונית לפי מוצר
         st.markdown("#### Summary: Quarterly Revenue by Product")
-
         quarterly_revenues_by_product = {}
         for product in product_list:
-            if product in results and product_name: # Ensure product name is not empty
+            if product in results and product:
                 quarterly_revenue = results[product]['revenue_per_segment_q'].sum(axis=1)
                 quarterly_revenues_by_product[product] = quarterly_revenue
-        
-        if quarterly_revenues_by_product: # Only proceed if there is data
+        if quarterly_revenues_by_product:
             summary_quarterly_rev_df = pd.DataFrame(quarterly_revenues_by_product)
             summary_quarterly_rev_df['Total'] = summary_quarterly_rev_df.sum(axis=1)
-
             summary_quarterly_rev_to_display = summary_quarterly_rev_df[summary_quarterly_rev_df.index >= main_display_start_date]
             st.dataframe(summary_quarterly_rev_to_display.T.style.format("${:,.0f}"))
+
+        # =======================================================
+        #               *** START OF NEW FEATURE ***
+        #            הוספת טבלת כמויות בטון לפי מוצר
+        # =======================================================
+        st.markdown("#### Summary: Quarterly Tons Sold by Product")
+        
+        quarterly_tons_by_product = {}
+        for product in product_list:
+            if product in results and product:
+                # 1. שלוף את הנתונים הדרושים מהתוצאות
+                data = results[product]
+                tons_per_customer_yearly = data['tons_per_customer']
+                cumulative_customers_q = data['cumulative_customers']
+                
+                # 2. המר את נתוני הטון השנתיים לרבעוניים
+                tons_per_customer_q = tons_per_customer_yearly.loc[cumulative_customers_q.index.year].set_axis(cumulative_customers_q.index) / 4
+                
+                # 3. חשב את סך הטונות שנמכרו בכל רבעון
+                total_tons_q = (tons_per_customer_q * cumulative_customers_q).sum(axis=1)
+                quarterly_tons_by_product[product] = total_tons_q
+
+        if quarterly_tons_by_product:
+            summary_quarterly_tons_df = pd.DataFrame(quarterly_tons_by_product)
+            summary_quarterly_tons_df['Total'] = summary_quarterly_tons_df.sum(axis=1)
+
+            summary_quarterly_tons_to_display = summary_quarterly_tons_df[summary_quarterly_tons_df.index >= main_display_start_date]
+            # הצג את הטבלה עם עיצוב של 2 ספרות אחרי הנקודה
+            st.dataframe(summary_quarterly_tons_to_display.T.style.format("{:,.2f}"))
         # =======================================================
         #               *** END OF NEW FEATURE ***
         # =======================================================
@@ -974,30 +997,15 @@ if st.session_state.results:
         with col1:
             excel_summary_data = to_excel({"summary": summary_for_excel, **results})
             if excel_summary_data:
-                 st.download_button(
-                    label="📥 Download Summary to Excel",
-                    data=excel_summary_data,
-                    file_name="Overall_Summary_Report.xlsx",
-                    use_container_width=True
-                )
+                 st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
         with col2:
             ppt_summary_data = create_summary_presentation(summary_for_excel, results)
             if ppt_summary_data:
-                st.download_button(
-                    label="📊 Download Summary Presentation",
-                    data=ppt_summary_data,
-                    file_name="Overall_Summary_Presentation.pptx",
-                    use_container_width=True
-                )
+                st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
         with col3:
             pdf_data = to_pdf(results)
             if pdf_data:
-                st.download_button(
-                    label="📄 Download Full PDF Report",
-                    data=pdf_data,
-                    file_name="Full_Analysis_Report.pdf",
-                    use_container_width=True
-                )
+                st.download_button(label="📄 Download Full PDF Report", data=pdf_data, file_name="Full_Analysis_Report.pdf", use_container_width=True)
 
 if not run_button and not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
