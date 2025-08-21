@@ -908,26 +908,50 @@ if st.session_state.results:
                     if ppt_product_data:
                         st.download_button(label=f"📊 Download {product_name} Presentation", data=ppt_product_data, file_name=f"{product_name}_Presentation.pptx", use_container_width=True)
 
-    # --- לשונית הסיכום הכללי ---
+# --- לשונית הסיכום הכללי ---
     with tabs[-1]:
         st.header("Overall Summary (All Products)")
         
+        # חישוב נתוני הסיכום
         summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
         summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
         summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
         summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
         
-        # --- START OF CHANGE: Use the correct start date for the summary filter ---
-        summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= main_display_start_date]
-        # --- END OF CHANGE ---
-
+        # הצגת טבלת סיכום הכנסות שנתית
         st.markdown("#### Summary: Total Revenue per Year")
         st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
+
+        # =======================================================
+        #               *** START OF NEW FEATURE ***
+        #            הוספת טבלת הכנסות רבעונית לפי מוצר
+        # =======================================================
+        st.markdown("#### Summary: Quarterly Revenue by Product")
+
+        quarterly_revenues_by_product = {}
+        for product in product_list:
+            if product in results and product_name: # Ensure product name is not empty
+                quarterly_revenue = results[product]['revenue_per_segment_q'].sum(axis=1)
+                quarterly_revenues_by_product[product] = quarterly_revenue
+        
+        if quarterly_revenues_by_product: # Only proceed if there is data
+            summary_quarterly_rev_df = pd.DataFrame(quarterly_revenues_by_product)
+            summary_quarterly_rev_df['Total'] = summary_quarterly_rev_df.sum(axis=1)
+
+            summary_quarterly_rev_to_display = summary_quarterly_rev_df[summary_quarterly_rev_df.index >= main_display_start_date]
+            st.dataframe(summary_quarterly_rev_to_display.T.style.format("${:,.0f}"))
+        # =======================================================
+        #               *** END OF NEW FEATURE ***
+        # =======================================================
+
+        # הצגת טבלת לקוחות מצטברים
+        summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= main_display_start_date]
         summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
         summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
         st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
         st.dataframe(summary_customers_display_T.style.format("{:,d}"))
         
+        # הצגת גרף סיכום הכנסות
         st.markdown("#### Chart: Total Revenue Breakdown by Product")
         all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
         summary_plot_df = pd.DataFrame(all_revenues)
@@ -943,9 +967,10 @@ if st.session_state.results:
         ax_sum.tick_params(axis='x', rotation=0)
         st.pyplot(fig_sum)
         st.markdown("---")
+
+        # כפתורי הורדה
         col1, col2, col3 = st.columns(3)
         summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
-        
         with col1:
             excel_summary_data = to_excel({"summary": summary_for_excel, **results})
             if excel_summary_data:
