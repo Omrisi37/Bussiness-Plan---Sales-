@@ -18,7 +18,7 @@ from weasyprint import HTML
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
 sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 # --- Global Settings ---
-MODEL_START_YEAR = 2026
+MODEL_START_YEAR = 2025
 
 # פונקציית עזר להמרת גרף לתמונה שניתן להטמיע ב-HTML
 def fig_to_base64_uri(fig):
@@ -852,28 +852,26 @@ if run_button:
 
 if st.session_state.results:
     results = st.session_state.results
-    # --- FIX: Filter out empty product names at the start to prevent errors ---
+    # מסנן החוצה מוצרים עם שם ריק כדי למנוע שגיאות
     product_list = [p for p in st.session_state.get('products', []) if p]
     tabs = st.tabs([*product_list, "Overall Summary"])
     
+    # --- הגדרת תאריכי תצוגה לפי הבקשה ---
     lead_display_start_date = pd.Timestamp('2025-01-01')
-    main_display_start_date = pd.Timestamp('2026-01-01')
+    main_display_start_date = pd.Timestamp('2025-07-01') # התחלת תצוגה מרבעון 3, 2025
 
     # --- לולאה להצגת התוצאות בכל לשונית של מוצר ---
     for i, product_name in enumerate(product_list):
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
-            # =======================================================
-            #        *** START OF NEW FEATURE: Profitability Table ***
-            # =======================================================
+            # טבלת סיכום רווחיות שנתית
             st.subheader("Profitability Summary (Yearly)")
             profit_summary_df = pd.DataFrame({
                 "Total Revenue": results[product_name]['revenue_per_segment_q'].sum(axis=1).resample('YE').sum(),
                 "Total Production Cost": results[product_name]['total_production_cost_q'].resample('YE').sum(),
                 "Total Profit": results[product_name]['profit_q'].resample('YE').sum()
             })
-            # Avoid division by zero if revenue is zero
             profit_summary_df["Profit Margin (%)"] = (profit_summary_df["Total Profit"] / profit_summary_df["Total Revenue"].replace(0, np.nan)).fillna(0) * 100
             profit_summary_df.index = profit_summary_df.index.year
             st.dataframe(profit_summary_df.style.format({
@@ -883,15 +881,13 @@ if st.session_state.results:
                 "Profit Margin (%)": "{:.1f}%"
             }))
             st.markdown("---")
-            # =======================================================
-            #        *** END OF NEW FEATURE: Profitability Table ***
-            # =======================================================
-
-            # --- שאר קוד התצוגה שכבר קיים ---
+            
+            # --- סינון נתונים לתצוגה לפי התאריכים החדשים ---
             leads_to_display = results[product_name]["lead_plan"][results[product_name]["lead_plan"].index >= lead_display_start_date]
             acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= main_display_start_date]
             cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= main_display_start_date]
             
+            # --- הצגת שאר התוצאות ---
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
             lead_plan_display_T = leads_to_display.T
@@ -951,14 +947,7 @@ if st.session_state.results:
                         rev_text = f"${revenue/1_000_000:.2f}M" if revenue >= 1_000_000 else f"${revenue/1_000:,.0f}K"
                         pie_labels.append(f"{segment}\n{percentage:.1f}%\n(YTD: {rev_text})")
                     colors = sns.color_palette('crest', n_colors=len(non_zero_cust_data))
-                    wedges, texts = ax_pie.pie(
-                        non_zero_cust_data,
-                        labels=pie_labels,
-                        colors=colors,
-                        startangle=90,
-                        wedgeprops=dict(width=0.4, edgecolor='w'),
-                        textprops={'fontsize': 11}
-                    )
+                    wedges, texts = ax_pie.pie(non_zero_cust_data, labels=pie_labels, colors=colors, startangle=90, wedgeprops=dict(width=0.4, edgecolor='w'), textprops={'fontsize': 11})
                     ax_pie.set_title(f"Customer Mix & YTD Revenue Contribution for {selected_quarter.year}-Q{selected_quarter.quarter}", fontsize=16, weight='bold')
                     st.pyplot(fig_pie)
                 else:
@@ -1029,7 +1018,6 @@ if st.session_state.results:
             summary_quarterly_tons_to_display = summary_quarterly_tons_df[summary_quarterly_tons_df.index >= main_display_start_date]
             st.dataframe(summary_quarterly_tons_to_display.T.style.format("{:,.2f}"))
 
-        # --- NEW: Profitability Summary Table ---
         st.markdown("#### Summary: Quarterly Profit by Product")
         quarterly_profit_by_product = {p: results[p]['profit_q'] for p in product_list if p in results}
         if quarterly_profit_by_product:
