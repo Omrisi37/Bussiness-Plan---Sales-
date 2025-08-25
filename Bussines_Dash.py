@@ -959,17 +959,23 @@ if st.session_state.results:
             results[product_name]['validation_df'] = validation_df
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
-            st.markdown("#### Chart: Target vs. Actual Annual Revenue ($)")
-            plot_df = validation_df.reset_index()
-            plot_df_melted = plot_df.melt(id_vars='Year', var_name='Type', value_name='Revenue')
+            st.markdown("#### Chart: Sales Income ($)")
+
+            # 1. הכנת נתונים פשוטה יותר - רק ההכנסה בפועל
+            plot_data = validation_df[['Actual Revenue']].reset_index()
+            
             fig, ax = plt.subplots(figsize=(14, 7))
-            barplot = sns.barplot(data=plot_df_melted, x='Year', y='Revenue', hue='Type', ax=ax, palette="mako")
-            ax.set_title(f'Target vs. Actual Revenue - {product_name}', fontsize=18, weight='bold')
+            
+            # 2. פקודת ציור פשוטה יותר, ללא הפרדה לפי 'Type'
+            barplot = sns.barplot(data=plot_data, x='Year', y='Actual Revenue', ax=ax, color='teal')
+            
+            # 3. עדכון הכותרות והטקסטים
+            ax.set_title(f'Sales Income ($) - {product_name}', fontsize=18, weight='bold')
             ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.1f}M"))
             ax.set_xlabel("Year", fontsize=12)
-            ax.set_ylabel("Revenue", fontsize=12)
+            ax.set_ylabel("Sales Income ($)", fontsize=12)
             for container in barplot.containers:
-                ax.bar_label(container, fmt='${:,.0f}', padding=5, fontsize=9, rotation=45)
+                ax.bar_label(container, fmt='${:,.0f}', padding=3, fontsize=10)
             st.pyplot(fig)
             with st.expander("View Underlying Assumptions"):
                 tons_per_customer_df = results[product_name].get('tons_per_customer')
