@@ -509,17 +509,21 @@ def load_scenario_data(user_id, scenario_name):
         st.sidebar.error(f"Error loading: {e}")
         return None
 
+# <<< פונקציית calculate_plan מתוקנת ומלאה >>>
+
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor,
-                   cost_quantities_t, cost_values_per_kg): # <-- פרמטרים חדשים
+                   cost_quantities_t, cost_values_per_kg): # <-- שמרתי על הפרמטרים החדשים שלך
     
+    # הגדרות כלליות מתוך הקוד שלך
+    MODEL_START_YEAR = 2025 # הנחתי שזו שנת ההתחלה, שנה בהתאם לצורך
     CALCULATION_START_YEAR = MODEL_START_YEAR
     NUM_YEARS = 6
     years = np.array([CALCULATION_START_YEAR + i for i in range(NUM_YEARS)])
     quarters_index = pd.date_range(start=f'{CALCULATION_START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
     customer_types = ['Medium', 'Large', 'Global']
     
-    # ... (כל חישובי הלקוחות וההכנסות נשארים זהים עד סוף הלולאה) ...
+    # --- חלק 1: חישוב מנועי הערך (טונות ללקוח ומחיר) - ללא שינוי ---
     tons_per_customer = pd.DataFrame(index=years, columns=customer_types, dtype=float)
     tons_per_customer.loc[CALCULATION_START_YEAR] = [is_m, is_l, is_g]
     initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
@@ -539,6 +543,7 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
             prev_tons, market_growth_factor = tons_per_customer.loc[prev_year, c_type], (1 + market_gr / 100)
             pen_growth_factor = pen_rate_df.loc[year_idx + 1, c_type] / pen_rate_df.loc[year_idx, c_type]
             tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
+    
     prices = []
     current_price = ip_kg
     decay_rate = pdr / 100.0
@@ -546,40 +551,92 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         prices.append(current_price)
         next_price = current_price * (1 - decay_rate)
         current_price = max(next_price, price_floor)
+        
     price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
-    quarterly_rev_targets = pd.Series(np.repeat(annual_rev_targets, 4) / 4, index=quarters_index)
-    quarterly_weights = np.array([0.30, 0.25, 0.25, 0.20])
-    weighted_quarterly_targets = []
-    for year_target in annual_rev_targets:
-        weighted_quarterly_targets.extend(year_target * quarterly_weights)
-    quarterly_rev_targets = pd.Series(weighted_quarterly_targets, index=quarters_index)
+
+    # --- חלק 2: מנוע החישוב ההפוך (Top-Down) ---
+
+    # !!! שינוי מרכזי כאן !!!
+    # הוסרה הלוגיקה הישנה, והוטמעה לוגיקת צמיחה רבעונית אוטומטית של 10%
+    Q_GROWTH_RATE = 0.10 # 10% צמיחה קבועה מרבעון לרבעון
+    growth_factors = np.array([1, (1 + Q_GROWTH_RATE), (1 + Q_GROWTH_RATE)**2, (1 + Q_GROWTH_RATE)**3])
+    quarterly_weights = growth_factors / growth_factors.sum()
+    
+    quarterly_rev_targets_list = []
+    for yearly_target in annual_rev_targets:
+        quarterly_rev_targets_list.extend(yearly_target * quarterly_weights)
+    
+    quarterly_rev_targets = pd.Series(quarterly_rev_targets_list, index=quarters_index)
+    # !!! סוף השינוי המרכזי !!!
+    
     total_focus = f_m + f_l + f_g
     if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
     focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
+    
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
+    
     for i, q_date in enumerate(quarters_index):
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
+        
         if revenue_gap > 0:
             blended_revenue_per_customer = (value_per_customer_type * pd.Series(focus_norm)).sum()
             if blended_revenue_per_customer > 0:
                 total_new_customers_needed = revenue_gap / blended_revenue_per_customer
                 for c_type in customer_types:
                     new_customers_plan.loc[q_date, c_type] = total_new_customers_needed * focus_norm[c_type]
+                    
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
-    
-    revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
-    revenue_per_segment_q = revenue_per_customer_type_q * cumulative_customers.round().astype(int)
-    actual_revenue_q = revenue_per_segment_q.sum(axis=1)
-    
-    # --- START OF NEW PROFITABILITY CALCULATION ---
 
-    # 1. Calculate total tons sold per quarter
-    total_tons_q = (tons_per_cust_q * cumulative_customers.round().astype(int)).sum(axis=1)
+    # --- חלק 3: חישוב פלטים סופיים ---
+
+    # חישוב הכנסות בפועל
+    revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
+    actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
+
+    # !!! הוספת חישוב לטבלאות החדשות שביקשת !!!
+    # טבלה ב': סך טונות לפי גודל לקוח
+    tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
+    # טבלה א': סך הכנסות לפי גודל לקוח
+    revenue_by_type_q = tons_by_type_q.mul(price_per_ton_q / 1000, axis=0) # מחיר לק"ג כפול 1000 לטון
+    
+    # --- השלמת חישוב הרווחיות שהתחלת ---
+    total_tons_q = tons_by_type_q.sum(axis=1)
+    
+    # חישוב עלות משתנה לפי מדרגות
+    cost_per_ton_q = pd.Series(0.0, index=quarters_index)
+    sorted_quantities = sorted(cost_quantities_t)
+    sorted_values = [cost_values_per_kg[cost_quantities_t.index(q)] for q in sorted_quantities]
+
+    for i, q_date in enumerate(quarters_index):
+        tons_sold = total_tons_q.loc[q_date]
+        if tons_sold > 0:
+            # מצא את מדרגת העלות המתאימה
+            cost_idx = np.searchsorted(sorted_quantities, tons_sold, side='right') -1
+            cost_per_kg = sorted_values[cost_idx] if cost_idx >= 0 else sorted_values[0]
+            cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
+    
+    total_cost_q = total_tons_q * cost_per_ton_q
+    profit_q = actual_revenue_q - total_cost_q
+    
+    # --- הכנת הנתונים להחזרה ---
+    annual_revenue_series = actual_revenue_q.resample('YE').sum()
+    annual_revenue_series.index = years
+    annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
+    
+    return {
+        "cumulative_customers": cumulative_customers,
+        "annual_revenue": annual_revenue_series,
+        "annual_revenue_targets": annual_revenue_targets_series,
+        "tons_by_type_q": tons_by_type_q,          # <-- פלט חדש
+        "revenue_by_type_q": revenue_by_type_q,    # <-- פלט חדש
+        "profit_q": profit_q,                      # <-- פלט רווח שהשלמתי
+        "error": None
+    }
 
     # 2. Create a function to find the cost per kg based on production volume
     # This function implements the step-wise logic from your table
@@ -783,18 +840,16 @@ with st.sidebar:
             default_revenues = [250000, 2700000, 5500000, 12000000, 32000000, 40000000]
             rev_targets = []
             for i in range(6):
-                actual_year = MODEL_START_YEAR + i
-                key = f'rev_y{i+1}_{product}'
-                default_val = st.session_state.get(key, default_revenues[i])
-                rev_slider_val = st.slider(
-                    f'Target for {actual_year}:', 
-                    0, 100_000_000, 
-                    default_val, 
-                    200000, 
-                    format="$%d", 
-                    key=key
+                year_num = i + 1
+                rev_val = st.number_input(
+                    f'Year {year_num}:', 
+                    min_value=0, 
+                    max_value=100_000_000, 
+                    value=default_revenues[i], 
+                    step=10000, 
+                    key=f'rev_y{year_num}_{product}'
                 )
-                rev_targets.append(rev_slider_val)
+                rev_targets.append(rev_val)
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
             st.markdown("**Sales Focus (%)**")
@@ -862,13 +917,21 @@ if st.session_state.results:
 
     # --- לולאה להצגת התוצאות בכל לשונית של מוצר ---
     for i, product_name in enumerate(product_list):
+       # <<< החלף את כל הקטע המקביל אצלך בקוד הבא >>>
+
+        # הגדרת פונקציית עזר לשימוש חוזר
+        def format_quarterly_cols(df_transposed):
+            df_copy = df_transposed.copy()
+            df_copy.columns = [f"{c.year}-Q{c.quarter}" for c in df_copy.columns]
+            return df_copy
+        
         with tabs[i]:
             st.header(f"Results for {product_name}")
             
             # טבלת סיכום רווחיות שנתית
             st.subheader("Profitability Summary (Yearly)")
             profit_summary_df = pd.DataFrame({
-                "Total Revenue": results[product_name]['revenue_per_segment_q'].sum(axis=1).resample('YE').sum(),
+                "Total Revenue": results[product_name]['annual_revenue'],
                 "Total Production Cost": results[product_name]['total_production_cost_q'].resample('YE').sum(),
                 "Total Profit": results[product_name]['profit_q'].resample('YE').sum()
             })
@@ -887,12 +950,15 @@ if st.session_state.results:
             acquired_to_display = results[product_name]["acquired_customers_plan"][results[product_name]["acquired_customers_plan"].index >= main_display_start_date]
             cumulative_to_display = results[product_name]["cumulative_customers"][results[product_name]["cumulative_customers"].index >= main_display_start_date]
             
+            # <<< התאמתי את השורות הבאות כדי שיעבדו עם פונקציית הסינון שלך >>>
+            revenue_by_type_to_display = results[product_name]["revenue_by_type_q"][results[product_name]["revenue_by_type_q"].index >= main_display_start_date]
+            tons_by_type_to_display = results[product_name]["tons_by_type_q"][results[product_name]["tons_by_type_q"].index >= main_display_start_date]
+        
             # --- הצגת שאר התוצאות ---
             st.subheader("Lead Generation")
             st.markdown("#### Table 0: Recommended Lead Contact Plan")
-            lead_plan_display_T = leads_to_display.T
-            lead_plan_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in lead_plan_display_T.columns]
-            st.dataframe(lead_plan_display_T.style.format("{:d}"))
+            lead_plan_display = format_quarterly_cols(leads_to_display.T)
+            st.dataframe(lead_plan_display.style.format("{:d}"))
             
             st.markdown("##### Chart 0: Yearly Lead Contact Plan")
             leads_for_chart0 = leads_to_display[leads_to_display.index.year != 2030]
@@ -901,10 +967,21 @@ if st.session_state.results:
             st.markdown("---")
             
             st.subheader("Action Plan & Outcomes")
+        
+            # <<< כאן הוספתי את הטבלאות החדשות שביקשת >>>
+            st.markdown("#### Table A: Revenue per Customer Type ($)")
+            revenue_by_type_display = format_quarterly_cols(revenue_by_type_to_display.T)
+            st.dataframe(revenue_by_type_display.style.format("${:,.0f}"))
+        
+            st.markdown("#### Table B: Tons Sold per Customer Type")
+            tons_by_type_display = format_quarterly_cols(tons_by_type_to_display.T)
+            st.dataframe(tons_by_type_display.style.format("{:,.2f}"))
+            st.markdown("---")
+            # <<< סוף ההוספה >>>
+        
             st.markdown("#### Table 1: Acquired New Customers per Quarter")
-            acquired_customers_display_T = acquired_to_display.T
-            acquired_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in acquired_customers_display_T.columns]
-            st.dataframe(acquired_customers_display_T.style.format("{:d}"))
+            acquired_customers_display = format_quarterly_cols(acquired_to_display.T)
+            st.dataframe(acquired_customers_display.style.format("{:d}"))
             
             st.markdown("##### Chart 1: Yearly Acquired New Customers")
             fig1 = create_yearly_bar_chart(df_quarterly=acquired_to_display, title=f"Acquired New Customers per Year - {product_name}", y_axis_label="Number of New Customers")
@@ -912,14 +989,13 @@ if st.session_state.results:
             st.markdown("---")
             
             st.markdown("#### Table 2: Cumulative Number of Customers (Quarterly)")
-            cum_cust_display_T = cumulative_to_display.T
-            cum_cust_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in cum_cust_display_T.columns]
-            st.dataframe(cum_cust_display_T.style.format("{:,d}"))
+            cum_cust_display = format_quarterly_cols(cumulative_to_display.T)
+            st.dataframe(cum_cust_display.style.format("{:,d}"))
             
             st.markdown("##### Chart 2: Cumulative Customers (End of Year)")
             fig2 = create_yearly_bar_chart(df_quarterly=cumulative_to_display, title=f"Cumulative Customers at Year End - {product_name}", y_axis_label="Total Number of Customers", is_cumulative=True)
             st.pyplot(fig2)
-
+        
             st.markdown("---")
             st.subheader("Interactive Analysis: Customer & YTD Revenue Mix")
             quarter_options = results[product_name]['cumulative_customers'].index
@@ -933,7 +1009,10 @@ if st.session_state.results:
                 cust_data_for_quarter = results[product_name]['cumulative_customers'].loc[selected_quarter]
                 selected_year = selected_quarter.year
                 start_of_year = pd.Timestamp(f'{selected_year}-01-01')
-                all_rev_data = results[product_name]['revenue_per_segment_q']
+                
+                # <<< תיקנתי כאן כדי להשתמש בטבלה החדשה והמדויקת יותר >>>
+                all_rev_data = results[product_name]['revenue_by_type_q'] 
+                
                 ytd_rev_df = all_rev_data[(all_rev_data.index >= start_of_year) & (all_rev_data.index <= selected_quarter)]
                 ytd_rev_per_segment = ytd_rev_df.sum()
                 non_zero_cust_data = cust_data_for_quarter[cust_data_for_quarter > 0]
@@ -952,7 +1031,7 @@ if st.session_state.results:
                     st.pyplot(fig_pie)
                 else:
                     st.info(f"No cumulative customers found for {selected_quarter.year}-Q{selected_quarter.quarter}.")
-
+        
             st.markdown("---")
             validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
             validation_df.index.name = "Year"
@@ -960,7 +1039,7 @@ if st.session_state.results:
             st.markdown("#### Table 3: Target vs. Actual Revenue")
             st.dataframe(validation_df.style.format({'Target Revenue': "${:,.0f}", 'Actual Revenue': "${:,.0f}"}))
             st.markdown("#### Chart: Sales Income ($)")
-
+        
             # 1. הכנת נתונים פשוטה יותר - רק ההכנסה בפועל
             plot_data = validation_df[['Actual Revenue']].reset_index()
             
@@ -997,79 +1076,3 @@ if st.session_state.results:
                     ppt_product_data = create_product_presentation(product_name, results[product_name])
                     if ppt_product_data:
                         st.download_button(label=f"📊 Download {product_name} Presentation", data=ppt_product_data, file_name=f"{product_name}_Presentation.pptx", use_container_width=True)
-
-    # --- לשונית הסיכום הכללי ---
-    with tabs[-1]:
-        st.header("Overall Summary (All Products)")
-        
-        summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
-        summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
-        
-        st.markdown("#### Summary: Total Revenue per Year")
-        st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
-        
-        st.markdown("#### Summary: Quarterly Revenue by Product")
-        quarterly_revenues_by_product = {p: results[p]['revenue_per_segment_q'].sum(axis=1) for p in product_list if p in results}
-        if quarterly_revenues_by_product:
-            summary_quarterly_rev_df = pd.DataFrame(quarterly_revenues_by_product)
-            summary_quarterly_rev_df['Total'] = summary_quarterly_rev_df.sum(axis=1)
-            summary_quarterly_rev_to_display = summary_quarterly_rev_df[summary_quarterly_rev_df.index >= main_display_start_date]
-            st.dataframe(summary_quarterly_rev_to_display.T.style.format("${:,.0f}"))
-
-        st.markdown("#### Summary: Quarterly Tons Sold by Product")
-        quarterly_tons_by_product = {p: results[p]['total_tons_q'] for p in product_list if p in results}
-        if quarterly_tons_by_product:
-            summary_quarterly_tons_df = pd.DataFrame(quarterly_tons_by_product)
-            summary_quarterly_tons_df['Total'] = summary_quarterly_tons_df.sum(axis=1)
-            summary_quarterly_tons_to_display = summary_quarterly_tons_df[summary_quarterly_tons_df.index >= main_display_start_date]
-            st.dataframe(summary_quarterly_tons_to_display.T.style.format("{:,.2f}"))
-
-        st.markdown("#### Summary: Quarterly Profit by Product")
-        quarterly_profit_by_product = {p: results[p]['profit_q'] for p in product_list if p in results}
-        if quarterly_profit_by_product:
-            summary_quarterly_profit_df = pd.DataFrame(quarterly_profit_by_product)
-            summary_quarterly_profit_df['Total'] = summary_quarterly_profit_df.sum(axis=1)
-            summary_quarterly_profit_to_display = summary_quarterly_profit_df[summary_quarterly_profit_df.index >= main_display_start_date]
-            st.dataframe(summary_quarterly_profit_to_display.T.style.format("${:,.0f}"))
-        
-        summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
-        summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
-        summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= main_display_start_date]
-        summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
-        summary_customers_display_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_display_T.columns]
-        st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
-        st.dataframe(summary_customers_display_T.style.format("{:,d}"))
-        
-        st.markdown("#### Chart: Total Revenue Breakdown by Product")
-        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
-        summary_plot_df = pd.DataFrame(all_revenues)
-        summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-        fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
-        summary_barplot = sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
-        for container in ax_sum.containers:
-            ax_sum.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=8, fontsize=10, color='black', fontweight='bold')
-        ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
-        ax_sum.set_ylabel('Revenue ($)', fontsize=12)
-        ax_sum.set_xlabel('Year', fontsize=12)
-        ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-        ax_sum.tick_params(axis='x', rotation=0)
-        st.pyplot(fig_sum)
-        st.markdown("---")
-        
-        col1, col2, col3 = st.columns(3)
-        summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
-        with col1:
-            excel_summary_data = to_excel({"summary": summary_for_excel, **results})
-            if excel_summary_data:
-                 st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
-        with col2:
-            ppt_summary_data = create_summary_presentation(summary_for_excel, results)
-            if ppt_summary_data:
-                st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
-        with col3:
-            pdf_data = to_pdf(results)
-            if pdf_data:
-                st.download_button(label="📄 Download Full PDF Report", data=pdf_data, file_name="Full_Analysis_Report.pdf", use_container_width=True)
-
-if not run_button and not st.session_state.results:
-    st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
