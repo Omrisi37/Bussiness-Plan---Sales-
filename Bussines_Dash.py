@@ -329,59 +329,84 @@ if 'results' not in st.session_state:
 
 # --- Excel Export ---
 @st.cache_data
+# <<< החלף את כל פונקציית to_excel שלך בקוד הבא >>>
+
 def to_excel(results_dict):
-    # --- START OF THE FINAL CORRECTED FUNCTION ---
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         # Loop for each product to create a dedicated sheet
         for product_name, data in results_dict.items():
-            if product_name == 'summary':
+            
+            # --- !!! התיקון נמצא כאן !!! ---
+            # מדלגים על ריצה אם שם המוצר ריק או אם זה מפתח הסיכום
+            if not product_name or product_name == 'summary':
                 continue
+            # --- סוף התיקון ---
             
             # --- Prepare all dataframes for the sheet ---
-            df_lead_plan_T = data['lead_plan'].T
-            df_acquired_cust_T = data['acquired_customers_plan'].T
-            df_cum_cust_q_T = data["cumulative_customers"].T
-            df_validation = data['validation_df']
-            df_tons_per_customer = data['tons_per_customer'].T
-            df_pen_rate = (data['pen_rate_df'] * 100).T
+            # שימוש ב-.get() כדי למנוע קריסות אם מפתח חסר
+            df_lead_plan_T = data.get('lead_plan', pd.DataFrame()).T
+            df_acquired_cust_T = data.get('acquired_customers_plan', pd.DataFrame()).T
+            df_cum_cust_q_T = data.get("cumulative_customers", pd.DataFrame()).T
+            df_validation = data.get('validation_df', pd.DataFrame())
+            df_tons_per_customer = data.get('tons_per_customer', pd.DataFrame()).T
+            df_pen_rate = (data.get('pen_rate_df', pd.DataFrame()) * 100).T
+            
+            # הוספת הטבלאות החדשות
+            df_revenue_by_type_T = data.get('revenue_by_type_q', pd.DataFrame()).T
+            df_tons_by_type_T = data.get('tons_by_type_q', pd.DataFrame()).T
+
 
             # Format all quarterly columns
-            for df in [df_lead_plan_T, df_acquired_cust_T, df_cum_cust_q_T]:
-                df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
+            quarterly_dfs = [
+                df_lead_plan_T, df_acquired_cust_T, df_cum_cust_q_T, 
+                df_revenue_by_type_T, df_tons_by_type_T
+            ]
+            for df in quarterly_dfs:
+                if not df.empty:
+                    df.columns = [f"{c.year}-Q{c.quarter}" for c in df.columns]
 
             # --- Write tables to the sheet one by one with correct ordering ---
-            # 1. Write the dataframe first (this creates the sheet)
-            # 2. Then write the title cell above it.
-
-            # Table 0
-            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=2)
-            writer.sheets[product_name].cell(row=1, column=1, value="Recommended Lead Contact Plan (Table 0)")
+            current_row = 1
             
-            # Table 1
-            startrow_1 = df_lead_plan_T.shape[0] + 6
-            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=startrow_1)
-            writer.sheets[product_name].cell(row=startrow_1 - 1, column=1, value="Acquired New Customers per Quarter (Table 1)")
+            # Table 0: Leads
+            df_lead_plan_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Recommended Lead Contact Plan (Table 0)")
+            current_row += df_lead_plan_T.shape[0] + 5
 
-            # Table 2
-            startrow_2 = startrow_1 + df_acquired_cust_T.shape[0] + 4
-            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=startrow_2)
-            writer.sheets[product_name].cell(row=startrow_2 - 1, column=1, value="Cumulative Customers (Quarterly) (Table 2)")
+            # Table A: Revenue by Type (NEW)
+            df_revenue_by_type_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Revenue per Customer Type ($) (Table A)")
+            current_row += df_revenue_by_type_T.shape[0] + 5
 
-            # Table 3
-            startrow_3 = startrow_2 + df_cum_cust_q_T.shape[0] + 4
-            df_validation.to_excel(writer, sheet_name=product_name, startrow=startrow_3)
-            writer.sheets[product_name].cell(row=startrow_3 - 1, column=1, value="Target vs. Actual Revenue (Table 3)")
+            # Table B: Tons by Type (NEW)
+            df_tons_by_type_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Tons Sold per Customer Type (Table B)")
+            current_row += df_tons_by_type_T.shape[0] + 5
 
-            # Table 4
-            startrow_4 = startrow_3 + df_validation.shape[0] + 4
-            df_tons_per_customer.to_excel(writer, sheet_name=product_name, startrow=startrow_4)
-            writer.sheets[product_name].cell(row=startrow_4 - 1, column=1, value="Annual Tons per Single Customer (Target-Driven) (Table 4)")
+            # Table 1: Acquired Customers
+            df_acquired_cust_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Acquired New Customers per Quarter (Table 1)")
+            current_row += df_acquired_cust_T.shape[0] + 5
 
-            # Table 5
-            startrow_5 = startrow_4 + df_tons_per_customer.shape[0] + 4
-            df_pen_rate.to_excel(writer, sheet_name=product_name, startrow=startrow_5)
-            writer.sheets[product_name].cell(row=startrow_5 - 1, column=1, value="Generated Penetration Rates to Meet Target (%) (Table 5)")
+            # Table 2: Cumulative Customers
+            df_cum_cust_q_T.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Cumulative Customers (Quarterly) (Table 2)")
+            current_row += df_cum_cust_q_T.shape[0] + 5
+            
+            # Table 3: Validation
+            df_validation.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Target vs. Actual Revenue (Table 3)")
+            current_row += df_validation.shape[0] + 5
+
+            # Table 4: Tons per Customer
+            df_tons_per_customer.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Annual Tons per Single Customer (Target-Driven) (Table 4)")
+            current_row += df_tons_per_customer.shape[0] + 5
+
+            # Table 5: Penetration Rate
+            df_pen_rate.to_excel(writer, sheet_name=product_name, startrow=current_row + 1)
+            writer.sheets[product_name].cell(row=current_row, column=1, value="Generated Penetration Rates to Meet Target (%) (Table 5)")
 
         # --- Overall Summary Sheet ---
         if "summary" in results_dict:
@@ -391,8 +416,11 @@ def to_excel(results_dict):
                 summary_customers_df = summary_data["summary_customers_raw"]
                 summary_revenue_df.to_excel(writer, sheet_name="Overall Summary", startrow=2)
                 writer.sheets["Overall Summary"].cell(row=1, column=1, value="Total Revenue per Year")
+                
                 summary_customers_df_T = summary_customers_df.to_frame("Total Customers").T
-                summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
+                if not summary_customers_df_T.empty:
+                    summary_customers_df_T.columns = [f"{c.year}-Q{c.quarter}" for c in summary_customers_df_T.columns]
+                
                 summary_customers_df_T.to_excel(writer, sheet_name="Overall Summary", startrow=10)
                 writer.sheets["Overall Summary"].cell(row=9, column=1, value="Total Cumulative Customers (Quarterly)")
             
@@ -1033,7 +1061,17 @@ if st.session_state.results:
                     st.info(f"No cumulative customers found for {selected_quarter.year}-Q{selected_quarter.quarter}.")
         
             st.markdown("---")
-            validation_df = pd.DataFrame({'Target Revenue': results[product_name]['annual_revenue_targets'], 'Actual Revenue': results[product_name]['annual_revenue']})
+            # <<< קוד חדש ומתוקן >>>
+
+            # First, align the index of the actual revenue
+            actual_revenue_series = results[product_name]['annual_revenue'].copy()
+            actual_revenue_series.index = actual_revenue_series.index.year
+            
+            # Now create the DataFrame with aligned indexes
+            validation_df = pd.DataFrame({
+                'Target Revenue': results[product_name]['annual_revenue_targets'], 
+                'Actual Revenue': actual_revenue_series
+            })
             validation_df.index.name = "Year"
             results[product_name]['validation_df'] = validation_df
             st.markdown("#### Table 3: Target vs. Actual Revenue")
