@@ -625,7 +625,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     
     # --- הכנת הנתונים להחזרה ---
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
-    annual_revenue_series.index = years
     annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
     
     return {
