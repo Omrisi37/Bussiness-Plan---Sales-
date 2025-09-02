@@ -634,6 +634,7 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "tons_by_type_q": tons_by_type_q,          # <-- פלט חדש
         "revenue_by_type_q": revenue_by_type_q,    # <-- פלט חדש
         "profit_q": profit_q,                      # <-- פלט רווח שהשלמתי
+        "total_production_cost_q": total_cost_q,
         "error": None
     }
 
