@@ -13,6 +13,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
 from weasyprint import HTML
+import plotly.express as px
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="Advanced Business Plan Dashboard")
@@ -20,6 +21,79 @@ sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 # --- Global Settings ---
 MODEL_START_YEAR = 2025
 
+# פונקציה 1: תרשים עמודות מוערם (Matplotlib/Seaborn)
+def create_stacked_bar_chart(df):
+    sns.set_theme(style="white") # הגדרת סגנון נקי ללא רשת
+    fig, ax = plt.subplots(figsize=(16, 9))
+    
+    df.plot(kind='bar', stacked=True, ax=ax, colormap='crest_r', width=0.7)
+    
+    for container in ax.containers:
+        labels = [f'${v/1_000_000:.1f}M' if v > sum(df.sum())*0.015 else '' for v in container.datavalues]
+        ax.bar_label(container, labels=labels, label_type='center', color='white', weight='bold', fontsize=10)
+
+    totals = df.sum(axis=1)
+    for i, total in enumerate(totals):
+        if total > 0:
+            ax.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
+
+    ax.set_title('Total Revenue Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
+    ax.set_ylabel('Revenue ($)', fontsize=14)
+    ax.set_xlabel('Year', fontsize=14)
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
+    ax.tick_params(axis='x', rotation=0, labelsize=12)
+    ax.tick_params(axis='y', labelsize=12)
+    ax.legend(title='Product', fontsize=12)
+    ax.spines[['top', 'right']].set_visible(False) # הסרת קווי מסגרת מיותרים
+    
+    return fig
+
+# פונקציה 2: תרשים עמודות מקובץ (Matplotlib/Seaborn)
+def create_grouped_bar_chart(df):
+    sns.set_theme(style="white")
+    fig, ax = plt.subplots(figsize=(16, 9))
+    
+    df_melted = df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+    
+    barplot = sns.barplot(data=df_melted, x='Year', y='Revenue', hue='Product', ax=ax, palette="viridis")
+    
+    for container in ax.containers:
+        ax.bar_label(container, fmt='$ {:,.0f}', rotation=90, padding=5, fontsize=9, color='black')
+
+    ax.set_title('Total Revenue by Product (Grouped)', fontsize=20, weight='bold', pad=20)
+    ax.set_ylabel('Revenue ($)', fontsize=14)
+    ax.set_xlabel('Year', fontsize=14)
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
+    ax.tick_params(axis='x', rotation=0, labelsize=12)
+    ax.tick_params(axis='y', labelsize=12)
+    ax.legend(title='Product', fontsize=12)
+    ax.spines[['top', 'right']].set_visible(False)
+    
+    return fig
+
+# פונקציה 3: תרשים אינטראקטיבי (Plotly)
+def create_interactive_plotly_chart(df):
+    df_melted = df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
+    fig = px.bar(
+        df_melted, 
+        x='Year', 
+        y='Revenue', 
+        color='Product',
+        barmode='group', # או 'stack' אם תעדיף
+        title="Interactive Revenue Breakdown by Product",
+        labels={'Revenue': 'Revenue ($)', 'Year': 'Year'},
+        template='plotly_white', # עיצוב נקי
+        color_discrete_sequence=px.colors.sequential.Cividis_r, # פלטת צבעים יפה
+        text_auto='.2s' # פורמט אוטומטי למספרים (למשל 4.5M)
+    )
+    fig.update_layout(
+        title={'font': {'size': 22}, 'x': 0.5},
+        legend_title_text='Product',
+        height=600
+    )
+    fig.update_traces(textangle=0, textposition='outside')
+    return fig
+שלב 3: עדכון לשונית הסיכום הכללי
 # פונקציית עזר להמרת גרף לתמונה שניתן להטמיע ב-HTML
 def fig_to_base64_uri(fig):
     buf = io.BytesIO()
@@ -1186,113 +1260,106 @@ if st.session_state.results:
                         st.download_button(label=f"📊 Download {product_name} Presentation", data=ppt_product_data, file_name=f"{product_name}_Presentation.pptx", use_container_width=True)
 
     # --- לשונית הסיכום הכללי מתחילה כאן (אחרי לולאת המוצרים) ---
-    with tabs[-1]:
-        st.header("Overall Summary (All Products)")
+    # <<< החלף את כל הקוד של לשונית הסיכום שלך בקוד המלא והמשולב הבא >>>
 
-        # --- סיכום הכנסות שנתי ---
-        summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
-        if summary_revenue_list:
-            summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
-            if pd.api.types.is_datetime64_any_dtype(summary_revenue_df.index):
-                summary_revenue_df.index = summary_revenue_df.index.year
-            st.markdown("#### Summary: Total Revenue per Year")
-            st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
-
-        # --- סיכום הכנסות רבעוני ---
-        quarterly_revenues_by_product = {p: results[p]['revenue_by_type_q'].sum(axis=1) for p in product_list if p in results}
-        if quarterly_revenues_by_product:
-            summary_quarterly_rev_df = pd.DataFrame(quarterly_revenues_by_product)
-            summary_quarterly_rev_df['Total'] = summary_quarterly_rev_df.sum(axis=1)
-            summary_quarterly_rev_to_display = summary_quarterly_rev_df[summary_quarterly_rev_df.index >= main_display_start_date]
-            st.markdown("#### Summary: Quarterly Revenue by Product")
-            st.dataframe(format_quarterly_cols(summary_quarterly_rev_to_display.T).style.format("${:,.0f}"))
-
-        # --- סיכום טונות רבעוני ---
-        quarterly_tons_by_product = {p: results[p]['tons_by_type_q'].sum(axis=1) for p in product_list if p in results}
-        if quarterly_tons_by_product:
-            summary_quarterly_tons_df = pd.DataFrame(quarterly_tons_by_product)
-            summary_quarterly_tons_df['Total'] = summary_quarterly_tons_df.sum(axis=1)
-            summary_quarterly_tons_to_display = summary_quarterly_tons_df[summary_quarterly_tons_df.index >= main_display_start_date]
-            st.markdown("#### Summary: Quarterly Tons Sold by Product")
-            st.dataframe(format_quarterly_cols(summary_quarterly_tons_to_display.T).style.format("{:,.2f}"))
-
-        # --- סיכום רווח רבעוני ---
-        quarterly_profit_by_product = {p: results[p]['profit_q'] for p in product_list if p in results}
-        if quarterly_profit_by_product:
-            summary_quarterly_profit_df = pd.DataFrame(quarterly_profit_by_product)
-            summary_quarterly_profit_df['Total'] = summary_quarterly_profit_df.sum(axis=1)
-            summary_quarterly_profit_to_display = summary_quarterly_profit_df[summary_quarterly_profit_df.index >= main_display_start_date]
-            st.markdown("#### Summary: Quarterly Profit by Product")
-            st.dataframe(format_quarterly_cols(summary_quarterly_profit_to_display.T).style.format("${:,.0f}"))
+        with tabs[-1]:
+            st.header("Overall Summary (All Products)")
         
-        # --- סיכום לקוחות מצטבר ---
-        summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
-        if summary_customers_list:
-            summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
-            summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= main_display_start_date]
-            summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
-            st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
-            st.dataframe(format_quarterly_cols(summary_customers_display_T).style.format("{:,d}"))
+            # --- חלק 1: הצגת כל טבלאות הסיכום (הקוד המקורי שלך, ללא שינוי) ---
+            # --- סיכום הכנסות שנתי ---
+            summary_revenue_list = [results[p]['annual_revenue'] for p in product_list if p in results]
+            if summary_revenue_list:
+                summary_revenue_df = pd.concat(summary_revenue_list, axis=1).sum(axis=1).to_frame(name="Total Revenue")
+                if pd.api.types.is_datetime64_any_dtype(summary_revenue_df.index):
+                    summary_revenue_df.index = summary_revenue_df.index.year
+                st.markdown("#### Summary: Total Revenue per Year")
+                st.dataframe(summary_revenue_df.style.format("${:,.0f}"))
         
-        # --- גרף סיכום ---
-        all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
-       # <<< החלף את כל קטע הקוד ששלחת בקטע המשופר הבא >>>
-
-        if all_revenues:
-            summary_plot_df = pd.DataFrame(all_revenues)
-            if pd.api.types.is_datetime64_any_dtype(summary_plot_df.index):
-                summary_plot_df.index = summary_plot_df.index.year
+            # --- סיכום הכנסות רבעוני ---
+            quarterly_revenues_by_product = {p: results[p]['revenue_by_type_q'].sum(axis=1) for p in product_list if p in results}
+            if quarterly_revenues_by_product:
+                summary_quarterly_rev_df = pd.DataFrame(quarterly_revenues_by_product)
+                summary_quarterly_rev_df['Total'] = summary_quarterly_rev_df.sum(axis=1)
+                summary_quarterly_rev_to_display = summary_quarterly_rev_df[summary_quarterly_rev_df.index >= main_display_start_date]
+                st.markdown("#### Summary: Quarterly Revenue by Product")
+                st.dataframe(format_quarterly_cols(summary_quarterly_rev_to_display.T).style.format("${:,.0f}"))
+        
+            # --- סיכום טונות רבעוני ---
+            quarterly_tons_by_product = {p: results[p]['tons_by_type_q'].sum(axis=1) for p in product_list if p in results}
+            if quarterly_tons_by_product:
+                summary_quarterly_tons_df = pd.DataFrame(quarterly_tons_by_product)
+                summary_quarterly_tons_df['Total'] = summary_quarterly_tons_df.sum(axis=1)
+                summary_quarterly_tons_to_display = summary_quarterly_tons_df[summary_quarterly_tons_df.index >= main_display_start_date]
+                st.markdown("#### Summary: Quarterly Tons Sold by Product")
+                st.dataframe(format_quarterly_cols(summary_quarterly_tons_to_display.T).style.format("{:,.2f}"))
+        
+            # --- סיכום רווח רבעוני ---
+            quarterly_profit_by_product = {p: results[p]['profit_q'] for p in product_list if p in results}
+            if quarterly_profit_by_product:
+                summary_quarterly_profit_df = pd.DataFrame(quarterly_profit_by_product)
+                summary_quarterly_profit_df['Total'] = summary_quarterly_profit_df.sum(axis=1)
+                summary_quarterly_profit_to_display = summary_quarterly_profit_df[summary_quarterly_profit_df.index >= main_display_start_date]
+                st.markdown("#### Summary: Quarterly Profit by Product")
+                st.dataframe(format_quarterly_cols(summary_quarterly_profit_to_display.T).style.format("${:,.0f}"))
             
-            # --- הגדרות עיצוב ---
-            sns.set_theme(style="whitegrid") # רקע נקי עם רשת עדינה
-            fig_sum, ax_sum = plt.subplots(figsize=(16, 9)) # גודל מקצועי ורחב
+            # --- סיכום לקוחות מצטבר ---
+            summary_customers_list = [results[p]['cumulative_customers'] for p in product_list if p in results]
+            if summary_customers_list:
+                summary_customers_total_q_raw = pd.concat(summary_customers_list, axis=1).sum(axis=1)
+                summary_customers_to_display = summary_customers_total_q_raw[summary_customers_total_q_raw.index >= main_display_start_date]
+                summary_customers_display_T = summary_customers_to_display.to_frame(name="Total Customers").T
+                st.markdown("#### Summary: Total Cumulative Customers (Quarterly)")
+                st.dataframe(format_quarterly_cols(summary_customers_display_T).style.format("{:,d}"))
             
-            # --- יצירת תרשים עמודות מוערם עם פלטת צבעים מודרנית ---
-            summary_plot_df.plot(kind='bar', stacked=True, ax=ax_sum, colormap='crest_r', width=0.7)
+        
+            # --- !!! חלק 2: הצגת התרשים הדינמי (הקוד החדש) !!! ---
+            all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
             
-            # --- לוגיקה חכמה להוספת תוויות נתונים ---
-            # הוספת תווית לכל מקטע בתוך העמודה
-            for container in ax_sum.containers:
-                # הצג את התווית רק אם המקטע גדול מספיק כדי לא ליצור עומס
-                labels = [f'${v/1_000_000:.1f}M' if v > sum(summary_plot_df.sum())*0.015 else '' for v in container.datavalues]
-                ax_sum.bar_label(container, labels=labels, label_type='center', color='white', weight='bold', fontsize=10)
+            if all_revenues:
+                summary_plot_df = pd.DataFrame(all_revenues)
+                if pd.api.types.is_datetime64_any_dtype(summary_plot_df.index):
+                    summary_plot_df.index = summary_plot_df.index.year
         
-            # הוספת תווית לסך הכל מעל כל עמודה
-            totals = summary_plot_df.sum(axis=1)
-            for i, total in enumerate(totals):
-                if total > 0:
-                    ax_sum.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
+                st.markdown("---")
+                st.markdown("#### Chart: Total Revenue Breakdown by Product")
         
-            # --- עיצוב סופי של התרשים ---
-            ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=20, weight='bold', pad=20)
-            ax_sum.set_ylabel('Revenue ($)', fontsize=14)
-            ax_sum.set_xlabel('Year', fontsize=14)
-            ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-            ax_sum.tick_params(axis='x', rotation=0, labelsize=12)
-            ax_sum.tick_params(axis='y', labelsize=12)
-            ax_sum.legend(title='Product', fontsize=12)
-            
-            st.markdown("#### Chart: Total Revenue Breakdown by Product")
-            st.pyplot(fig_sum)
+                # בורר המצבים החדש לבחירת סוג התרשים
+                chart_type = st.radio(
+                    "Select Chart Style:",
+                    options=["Interactive (Plotly)", "Stacked Bar", "Grouped Bar"],
+                    horizontal=True,
+                    label_visibility="collapsed"
+                )
         
-        st.markdown("---")
+                if chart_type == "Stacked Bar":
+                    fig_to_show = create_stacked_bar_chart(summary_plot_df)
+                    st.pyplot(fig_to_show)
+                
+                elif chart_type == "Grouped Bar":
+                    fig_to_show = create_grouped_bar_chart(summary_plot_df)
+                    st.pyplot(fig_to_show)
+                    
+                elif chart_type == "Interactive (Plotly)":
+                    fig_to_show = create_interactive_plotly_chart(summary_plot_df)
+                    st.plotly_chart(fig_to_show, use_container_width=True)
         
-        # --- כפתורי הורדה ---
-        if 'summary_revenue_df' in locals() and 'summary_customers_total_q_raw' in locals():
-            col1, col2, col3 = st.columns(3)
-            summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
-            with col1:
-                excel_summary_data = to_excel({"summary": summary_for_excel, **results})
-                if excel_summary_data:
-                    st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
-            with col2:
-                ppt_summary_data = create_summary_presentation(summary_for_excel, results)
-                if ppt_summary_data:
-                    st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
-            with col3:
-                pdf_data = to_pdf(results)
-                if pdf_data:
-                    st.download_button(label="📄 Download Full PDF Report", data=pdf_data, file_name="Full_Analysis_Report.pdf", use_container_width=True)
+            # --- חלק 3: כפתורי הורדה (הקוד המקורי שלך, ללא שינוי) ---
+            st.markdown("---")
+            if 'summary_revenue_df' in locals() and 'summary_customers_total_q_raw' in locals():
+                col1, col2, col3 = st.columns(3)
+                summary_for_excel = {"summary_revenue": summary_revenue_df, "summary_customers_raw": summary_customers_total_q_raw}
+                with col1:
+                    excel_summary_data = to_excel({"summary": summary_for_excel, **results})
+                    if excel_summary_data:
+                        st.download_button(label="📥 Download Summary to Excel", data=excel_summary_data, file_name="Overall_Summary_Report.xlsx", use_container_width=True)
+                with col2:
+                    ppt_summary_data = create_summary_presentation(summary_for_excel, results)
+                    if ppt_summary_data:
+                        st.download_button(label="📊 Download Summary Presentation", data=ppt_summary_data, file_name="Overall_Summary_Presentation.pptx", use_container_width=True)
+                with col3:
+                    pdf_data = to_pdf(results)
+                    if pdf_data:
+                        st.download_button(label="📄 Download Full PDF Report", data=pdf_data, file_name="Full_Analysis_Report.pdf", use_container_width=True)
 
 if not st.session_state.results:
     st.info("Set your parameters in the sidebar and click 'Run Full Analysis' to see the results.")
