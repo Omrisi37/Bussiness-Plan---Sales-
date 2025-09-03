@@ -37,7 +37,7 @@ def create_stacked_bar_chart(df):
         if total > 0:
             ax.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
 
-    ax.set_title('Total Revenue Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
+    ax.set_title('Total Sales Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
     ax.set_ylabel('Revenue ($)', fontsize=14)
     ax.set_xlabel('Year', fontsize=14)
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
@@ -58,9 +58,9 @@ def create_grouped_bar_chart(df):
     barplot = sns.barplot(data=df_melted, x='Year', y='Revenue', hue='Product', ax=ax, palette="viridis")
     
     for container in ax.containers:
-        ax.bar_label(container, fmt='$ {:,.0f}', rotation=90, padding=5, fontsize=9, color='black')
+        ax.bar_label(container, fmt='$ {:,.0f}', rotation=45, padding=5, fontsize=9, color='black')
 
-    ax.set_title('Total Revenue by Product (Grouped)', fontsize=20, weight='bold', pad=20)
+    ax.set_title('Total Sales by Product (Grouped)', fontsize=20, weight='bold', pad=20)
     ax.set_ylabel('Revenue ($)', fontsize=14)
     ax.set_xlabel('Year', fontsize=14)
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
@@ -80,14 +80,14 @@ def create_interactive_plotly_chart(df):
         y='Revenue', 
         color='Product',
         barmode='group', # או 'stack' אם תעדיף
-        title="Interactive Revenue Breakdown by Product",
+        title="Interactive Sales Breakdown by Product",
         labels={'Revenue': 'Revenue ($)', 'Year': 'Year'},
         template='plotly_white', # עיצוב נקי
-        color_discrete_sequence=px.colors.sequential.Cividis_r, # פלטת צבעים יפה
+        color_discrete_sequence=px.colors.sequential.Plasma_r, # פלטת צבעים יפה
         text_auto='.2s' # פורמט אוטומטי למספרים (למשל 4.5M)
     )
     fig.update_layout(
-        title={'font': {'size': 22}, 'x': 0.5},
+        title={'font': {'size': 22}, 'x': 0.5, 'xanchor': 'center'},
         legend_title_text='Product',
         height=600
     )
