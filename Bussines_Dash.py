@@ -752,19 +752,19 @@ st.title("Meala Dynamic Multi-Product Business Plan Dashboard")
 with st.sidebar:
     st.title("Business Plan Controls")
     with st.expander("Global Parameters (Applied to all products)"):
-    st.markdown("**Model Start Date**")
-    col1, col2 = st.columns(2)
-    with col1:
-        model_start_year = st.selectbox("Start Year", options=[2025, 2026, 2027], index=0, key="start_year")
-    with col2:
-        # הגדרת הרבעון הנוכחי כברירת מחדל
-        from datetime import date
-        current_quarter = (date.today().month - 1) // 3 + 1
-        start_quarter_index = current_quarter - 1 if model_start_year == 2025 else 0
-        
-        model_start_quarter = st.selectbox("Start Quarter", options=[1, 2, 3, 4], index=start_quarter_index, key="start_quarter")
-
-    st.markdown("---") # קו מפריד
+        st.markdown("**Model Start Date**")
+        col1, col2 = st.columns(2)
+        with col1:
+            model_start_year = st.selectbox("Start Year", options=[2025, 2026, 2027], index=0, key="start_year")
+        with col2:
+            # הגדרת הרבעון הנוכחי כברירת מחדל
+            from datetime import date
+            current_quarter = (date.today().month - 1) // 3 + 1
+            start_quarter_index = current_quarter - 1 if model_start_year == 2025 else 0
+            
+            model_start_quarter = st.selectbox("Start Quarter", options=[1, 2, 3, 4], index=start_quarter_index, key="start_quarter")
+    
+        st.markdown("---") # קו מפריד
     
     # --- Expander for User & Scenarios ---
     with st.expander("User & Scenarios", expanded=True):
