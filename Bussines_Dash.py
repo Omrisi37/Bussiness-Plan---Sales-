@@ -58,7 +58,7 @@ def create_stacked_bar_chart(df):
         if total > 0:
             ax.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
 
-    ax.set_title('Total Revenue Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
+    ax.set_title('Total Sales Breakdown by Product', fontsize=20, weight='bold', pad=20)
     ax.set_ylabel('Revenue ($)', fontsize=14)
     ax.set_xlabel('Year', fontsize=14)
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
