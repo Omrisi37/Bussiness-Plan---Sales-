@@ -807,9 +807,13 @@ with st.sidebar:
             col_load, col_save = st.columns(2)
 
             # --- עמודה שמאלית: טעינה ומחיקה ---
+           # <<< החלף את כל קטע הטעינה והמחיקה שלך בקוד הבא >>>
+
             with col_load:
                 st.subheader("Load or Delete")
-                if len(saved_scenarios) > 1:
+                
+                # בדיקה אם יש תרחישים שמורים בכלל
+                if saved_scenarios:
                     selected_scenario = st.selectbox(
                         "Select scenario",
                         options=saved_scenarios, 
@@ -817,33 +821,49 @@ with st.sidebar:
                         key="load_scenario_select",
                         label_visibility="collapsed"
                     )
-
-                    # לוגיקת טעינה
+            
+                    # --- !!! לוגיקת טעינה מתוקנת !!! ---
                     if st.button("Load Scenario") and selected_scenario:
                         loaded_data = load_scenario_data(user_id, selected_scenario)
                         if loaded_data:
+                            # 1. הגדרת מפתחות חיוניים שאסור למחוק בזמן הטעינה
+                            keys_to_preserve = [
+                                'user_id', 'products', 'results', 'load_scenario_select', 
+                                'scenario_name', 'confirm_delete_checkbox', 'new_product_name_input'
+                            ]
+            
+                            # 2. ניקוי כל המפתחות הישנים (ערכי הווידג'טים) מה-session state
+                            for key in list(st.session_state.keys()):
+                                # בדיקה אם המפתח הוא חיוני או שייך לווידג'ט פנימי של Streamlit
+                                is_essential = any(key.startswith(p_key) for p_key in keys_to_preserve)
+                                if not is_essential and not key.startswith(('FormSubmitter', '_')):
+                                    del st.session_state[key]
+                            
+                            # 3. איפוס תוצאות וטעינת הנתונים החדשים ל-session state הנקי
                             st.session_state.results = {}
                             for key, value in loaded_data.items():
-                                if key == 'user_id':
-                                    continue
-                                try:
-                                    st.session_state[key] = deserialize_from_firestore(value)
-                                except Exception as e:
-                                    st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
-                                    raise e
-                            st.sidebar.success("Scenario loaded!")
-                            st.rerun()
-
+                                if key not in ['user_id', 'results']: # לא טוענים מחדש את המשתמש או התוצאות
+                                    try:
+                                        st.session_state[key] = deserialize_from_firestore(value)
+                                    except Exception as e:
+                                        st.sidebar.error(f"Failed to load key: '{key}'. Error: {e}")
+                            
+                            st.sidebar.success(f"Scenario '{selected_scenario}' loaded!")
+                            st.rerun() # 4. הפעלה מחדש מיידית של האפליקציה
+            
                     st.markdown("---")
                     
-                    # לוגיקת מחיקה
+                    # --- לוגיקת מחיקה (ללא שינוי מהותי) ---
                     if selected_scenario:
                         confirm_delete = st.checkbox(f"Confirm deletion of '{selected_scenario}'", key="confirm_delete_checkbox")
                         if st.button("Delete Scenario", type="primary"):
                             if confirm_delete:
                                 if delete_scenario(user_id, selected_scenario):
-                                    st.session_state.results = {}
-                                    del st.session_state.confirm_delete_checkbox
+                                    st.session_state.results = {} # איפוס תוצאות
+                                    # ניקוי כל המפתחות כדי לחזור למצב התחלתי נקי
+                                    for key in list(st.session_state.keys()):
+                                        if key not in ['user_id']: # השאר רק את היוזר
+                                            del st.session_state[key]
                                     st.rerun()
                             else:
                                 st.warning("Please check the box to confirm.")
