@@ -1236,19 +1236,42 @@ if st.session_state.results:
         
         # --- גרף סיכום ---
         all_revenues = {p: results[p]['annual_revenue'] for p in product_list if p in results}
+       # <<< החלף את כל קטע הקוד ששלחת בקטע המשופר הבא >>>
+
         if all_revenues:
             summary_plot_df = pd.DataFrame(all_revenues)
             if pd.api.types.is_datetime64_any_dtype(summary_plot_df.index):
                 summary_plot_df.index = summary_plot_df.index.year
             
-            summary_plot_df_melted = summary_plot_df.reset_index().rename(columns={'index': 'Year'}).melt(id_vars='Year', var_name='Product', value_name='Revenue')
-            fig_sum, ax_sum = plt.subplots(figsize=(15, 8))
-            sns.barplot(data=summary_plot_df_melted, x='Year', y='Revenue', hue='Product', ax=ax_sum, palette="rocket_r")
-            ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=18, weight='bold')
-            ax_sum.set_ylabel('Revenue ($)', fontsize=12)
-            ax_sum.set_xlabel('Year', fontsize=12)
+            # --- הגדרות עיצוב ---
+            sns.set_theme(style="whitegrid") # רקע נקי עם רשת עדינה
+            fig_sum, ax_sum = plt.subplots(figsize=(16, 9)) # גודל מקצועי ורחב
+            
+            # --- יצירת תרשים עמודות מוערם עם פלטת צבעים מודרנית ---
+            summary_plot_df.plot(kind='bar', stacked=True, ax=ax_sum, colormap='crest_r', width=0.7)
+            
+            # --- לוגיקה חכמה להוספת תוויות נתונים ---
+            # הוספת תווית לכל מקטע בתוך העמודה
+            for container in ax_sum.containers:
+                # הצג את התווית רק אם המקטע גדול מספיק כדי לא ליצור עומס
+                labels = [f'${v/1_000_000:.1f}M' if v > sum(summary_plot_df.sum())*0.015 else '' for v in container.datavalues]
+                ax_sum.bar_label(container, labels=labels, label_type='center', color='white', weight='bold', fontsize=10)
+        
+            # הוספת תווית לסך הכל מעל כל עמודה
+            totals = summary_plot_df.sum(axis=1)
+            for i, total in enumerate(totals):
+                if total > 0:
+                    ax_sum.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
+        
+            # --- עיצוב סופי של התרשים ---
+            ax_sum.set_title('Total Revenue Breakdown by Product', fontsize=20, weight='bold', pad=20)
+            ax_sum.set_ylabel('Revenue ($)', fontsize=14)
+            ax_sum.set_xlabel('Year', fontsize=14)
             ax_sum.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
-            ax_sum.tick_params(axis='x', rotation=0)
+            ax_sum.tick_params(axis='x', rotation=0, labelsize=12)
+            ax_sum.tick_params(axis='y', labelsize=12)
+            ax_sum.legend(title='Product', fontsize=12)
+            
             st.markdown("#### Chart: Total Revenue Breakdown by Product")
             st.pyplot(fig_sum)
         
