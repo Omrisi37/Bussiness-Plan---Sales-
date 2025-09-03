@@ -539,12 +539,15 @@ def load_scenario_data(user_id, scenario_name):
 
 # <<< פונקציית calculate_plan מתוקנת ומלאה >>>
 
+# <<< החלף את כל פונקציית calculate_plan שלך בקוד הבא >>>
+
 def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor,
-                   cost_quantities_t, cost_values_per_kg): # <-- שמרתי על הפרמטרים החדשים שלך
+                   cost_quantities_t, cost_values_per_kg,
+                   start_year, start_quarter): # <<< הוספתי פרמטרים חדשים
     
     # הגדרות כלליות מתוך הקוד שלך
-    MODEL_START_YEAR = 2025 # הנחתי שזו שנת ההתחלה, שנה בהתאם לצורך
+    MODEL_START_YEAR = 2025
     CALCULATION_START_YEAR = MODEL_START_YEAR
     NUM_YEARS = 6
     years = np.array([CALCULATION_START_YEAR + i for i in range(NUM_YEARS)])
@@ -585,8 +588,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
 
     # --- חלק 2: מנוע החישוב ההפוך (Top-Down) ---
 
-    # !!! שינוי מרכזי כאן !!!
-    # הוסרה הלוגיקה הישנה, והוטמעה לוגיקת צמיחה רבעונית אוטומטית של 10%
     Q_GROWTH_RATE = 0.10 # 10% צמיחה קבועה מרבעון לרבעון
     growth_factors = np.array([1, (1 + Q_GROWTH_RATE), (1 + Q_GROWTH_RATE)**2, (1 + Q_GROWTH_RATE)**3])
     quarterly_weights = growth_factors / growth_factors.sum()
@@ -596,7 +597,14 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         quarterly_rev_targets_list.extend(yearly_target * quarterly_weights)
     
     quarterly_rev_targets = pd.Series(quarterly_rev_targets_list, index=quarters_index)
-    # !!! סוף השינוי המרכזי !!!
+    
+    # --- !!! שינוי מרכזי כאן: הוספת לוגיקת תאריך התחלה !!! ---
+    # 1. הגדרת תאריך ההתחלה על פי בחירת המשתמש
+    start_date = pd.Timestamp(f"{start_year}-{(start_quarter-1)*3 + 1}-01")
+    
+    # 2. איפוס כל יעדי ההכנסות לפני תאריך ההתחלה
+    quarterly_rev_targets.loc[quarterly_rev_targets.index < start_date] = 0
+    # --- סוף השינוי המרכזי ---
     
     total_focus = f_m + f_l + f_g
     if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
@@ -621,21 +629,14 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
 
     # --- חלק 3: חישוב פלטים סופיים ---
-
-    # חישוב הכנסות בפועל
     revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
 
-    # !!! הוספת חישוב לטבלאות החדשות שביקשת !!!
-    # טבלה ב': סך טונות לפי גודל לקוח
     tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
-    # טבלה א': סך הכנסות לפי גודל לקוח
-    revenue_by_type_q = tons_by_type_q.mul(price_per_ton_q / 1000, axis=0) # מחיר לק"ג כפול 1000 לטון
+    revenue_by_type_q = tons_by_type_q.mul(price_per_ton_q / 1000, axis=0)
     
-    # --- השלמת חישוב הרווחיות שהתחלת ---
     total_tons_q = tons_by_type_q.sum(axis=1)
     
-    # חישוב עלות משתנה לפי מדרגות
     cost_per_ton_q = pd.Series(0.0, index=quarters_index)
     sorted_quantities = sorted(cost_quantities_t)
     sorted_values = [cost_values_per_kg[cost_quantities_t.index(q)] for q in sorted_quantities]
@@ -643,7 +644,6 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     for i, q_date in enumerate(quarters_index):
         tons_sold = total_tons_q.loc[q_date]
         if tons_sold > 0:
-            # מצא את מדרגת העלות המתאימה
             cost_idx = np.searchsorted(sorted_quantities, tons_sold, side='right') -1
             cost_per_kg = sorted_values[cost_idx] if cost_idx >= 0 else sorted_values[0]
             cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
@@ -653,21 +653,19 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     
     # --- הכנת הנתונים להחזרה ---
     annual_revenue_series = actual_revenue_q.resample('YE').sum()
-    annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
     
     return {
         "cumulative_customers": cumulative_customers,
         "annual_revenue": annual_revenue_series,
-        "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_by_type_q": tons_by_type_q,          # <-- פלט חדש
-        "revenue_by_type_q": revenue_by_type_q,    # <-- פלט חדש
-        "profit_q": profit_q,                      # <-- פלט רווח שהשלמתי
+        "annual_revenue_targets": pd.Series(annual_rev_targets, index=years),
+        "tons_by_type_q": tons_by_type_q,
+        "revenue_by_type_q": revenue_by_type_q,
+        "profit_q": profit_q,
         "total_production_cost_q": total_cost_q,
         "tons_per_customer": tons_per_customer,
         "pen_rate_df": pen_rate_df,
         "error": None
     }
-
     # 2. Create a function to find the cost per kg based on production volume
     # This function implements the step-wise logic from your table
     def get_cost_per_kg(tons_produced):
@@ -753,6 +751,20 @@ st.title("Meala Dynamic Multi-Product Business Plan Dashboard")
 
 with st.sidebar:
     st.title("Business Plan Controls")
+    with st.expander("Global Parameters (Applied to all products)"):
+    st.markdown("**Model Start Date**")
+    col1, col2 = st.columns(2)
+    with col1:
+        model_start_year = st.selectbox("Start Year", options=[2025, 2026, 2027], index=0, key="start_year")
+    with col2:
+        # הגדרת הרבעון הנוכחי כברירת מחדל
+        from datetime import date
+        current_quarter = (date.today().month - 1) // 3 + 1
+        start_quarter_index = current_quarter - 1 if model_start_year == 2025 else 0
+        
+        model_start_quarter = st.selectbox("Start Quarter", options=[1, 2, 3, 4], index=start_quarter_index, key="start_quarter")
+
+    st.markdown("---") # קו מפריד
     
     # --- Expander for User & Scenarios ---
     with st.expander("User & Scenarios", expanded=True):
@@ -922,7 +934,7 @@ if run_button:
     results_data = {}
     # Use a copy of the list to avoid issues if it's modified
     for product in st.session_state.get('products', []).copy():
-        res = calculate_plan(**product_inputs[product])
+        res = calculate_plan(**product_inputs[product], start_year=model_start_year, start_quarter=model_start_quarter)
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
         
