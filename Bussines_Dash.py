@@ -21,13 +21,34 @@ sns.set_theme(style="darkgrid", font_scale=1.1, palette="viridis")
 # --- Global Settings ---
 MODEL_START_YEAR = 2025
 
-# פונקציה 1: תרשים עמודות מוערם (Matplotlib/Seaborn)
+# <<< החלף את פונקציית ה-Stacked Bar שלך בזו המעודכנת >>>
+
+# פונקציה 1: תרשים עמודות מוערם (Matplotlib/Seaborn) עם צבעים מותאמים אישית
 def create_stacked_bar_chart(df):
-    sns.set_theme(style="white") # הגדרת סגנון נקי ללא רשת
+    sns.set_theme(style="white")
     fig, ax = plt.subplots(figsize=(16, 9))
     
-    df.plot(kind='bar', stacked=True, ax=ax, colormap='crest_r', width=0.7)
+    # --- !!! שינוי כאן: הגדרת מילון הצבעים !!! ---
+    color_map = {
+        'Plant Based': 'gold',   # צהוב
+        'Baking': 'lightpink', # ורוד
+        'other': 'mediumseagreen'  # ירוק
+    }
     
+    # מיון העמודות לפי סדר המוצרים במילון הצבעים כדי להבטיח התאמה
+    # אם שם מוצר לא במילון, הוא יקבל צבע ברירת מחדל
+    ordered_columns = [col for col in color_map.keys() if col in df.columns]
+    
+    # --- !!! שינוי כאן: שימוש במילון הצבעים בפקודת הציור !!! ---
+    df[ordered_columns].plot(
+        kind='bar', 
+        stacked=True, 
+        ax=ax, 
+        color=[color_map.get(col) for col in ordered_columns], # שימוש בצבעים המוגדרים
+        width=0.7
+    )
+    
+    # שאר הקוד של הפונקציה נשאר זהה
     for container in ax.containers:
         labels = [f'${v/1_000_000:.1f}M' if v > sum(df.sum())*0.015 else '' for v in container.datavalues]
         ax.bar_label(container, labels=labels, label_type='center', color='white', weight='bold', fontsize=10)
@@ -37,14 +58,14 @@ def create_stacked_bar_chart(df):
         if total > 0:
             ax.text(i, total + (totals.max() * 0.01), f'${total:,.0f}', ha='center', va='bottom', weight='bold', fontsize=12)
 
-    ax.set_title('Total Sales Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
+    ax.set_title('Total Revenue Breakdown by Product (Stacked)', fontsize=20, weight='bold', pad=20)
     ax.set_ylabel('Revenue ($)', fontsize=14)
     ax.set_xlabel('Year', fontsize=14)
     ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x/1_000_000:.0f}M"))
     ax.tick_params(axis='x', rotation=0, labelsize=12)
     ax.tick_params(axis='y', labelsize=12)
     ax.legend(title='Product', fontsize=12)
-    ax.spines[['top', 'right']].set_visible(False) # הסרת קווי מסגרת מיותרים
+    ax.spines[['top', 'right']].set_visible(False)
     
     return fig
 
