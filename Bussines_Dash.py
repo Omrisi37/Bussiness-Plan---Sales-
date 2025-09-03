@@ -93,7 +93,6 @@ def create_interactive_plotly_chart(df):
     )
     fig.update_traces(textangle=0, textposition='outside')
     return fig
-שלב 3: עדכון לשונית הסיכום הכללי
 # פונקציית עזר להמרת גרף לתמונה שניתן להטמיע ב-HTML
 def fig_to_base64_uri(fig):
     buf = io.BytesIO()
