@@ -631,16 +631,10 @@ def load_scenario_data(user_id, scenario_name):
         st.sidebar.error(f"Error loading: {e}")
         return None
 
-# <<< פונקציית calculate_plan מתוקנת ומלאה >>>
-
-# <<< החלף את כל פונקציית calculate_plan שלך בקוד הבא >>>
-
-# <<< החלף את כל פונקציית calculate_plan שלך בקוד הבא >>>
-
-def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g, 
-                   annual_rev_targets, f_m, f_l, f_g, ip_kg, pdr, price_floor,
+def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, tt_g, 
+                   annual_rev_targets, f_s, f_m, f_l, f_g, ip_kg, pdr, price_floor,
                    cost_quantities_t, cost_values_per_kg,
-                   global_start_year, global_start_quarter, launch_year): # <<< עדכון חתימת הפונקציה
+                   global_start_year, global_start_quarter, launch_year):
 
     # הגדרות כלליות
     MODEL_START_YEAR = 2025
@@ -648,26 +642,27 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     NUM_YEARS = 6
     years = np.array([CALCULATION_START_YEAR + i for i in range(NUM_YEARS)])
     quarters_index = pd.date_range(start=f'{CALCULATION_START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
-    customer_types = ['Medium', 'Large', 'Global']
+    
+    # --- עדכון: הוספת Small לרשימת הלקוחות ---
+    customer_types = ['Small', 'Medium', 'Large', 'Global']
     
     # --- חלק 1: חישוב מנועי הערך (עם לוגיקת השקה דינמית) ---
     
-    # !!! שינוי מרכזי כאן: חישוב צמיחה דינמי מבוסס שנת השקה !!!
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
     
     last_model_year = years[-1]
     
     # אם שנת ההשקה היא אחרי תקופת המודל, כל החישובים יהיו אפס
     if launch_year <= last_model_year:
-        # הצבת הערך ההתחלתי בשנה הנכונה
-        tons_per_customer.loc[launch_year] = [is_m, is_l, is_g]
+        # --- עדכון: הצבת הערך ההתחלתי כולל S ---
+        tons_per_customer.loc[launch_year] = [is_s, is_m, is_l, is_g]
 
         # חישוב תקופת המכירה האמיתית של המוצר
         sales_duration_years = last_model_year - launch_year + 1
         
-        # חישוב אחוזי חדירה דינמיים
-        initial_tons = {'Medium': is_m, 'Large': is_l, 'Global': is_g}
-        target_tons = {'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
+        # --- עדכון: הוספת S למילוני היעדים ---
+        initial_tons = {'Small': is_s, 'Medium': is_m, 'Large': is_l, 'Global': is_g}
+        target_tons = {'Small': tt_s, 'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
         
         # אינדקס יחסי לתקופת המכירה
         relative_year_index = range(1, sales_duration_years + 1)
@@ -724,24 +719,22 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
     
     quarterly_rev_targets = pd.Series(quarterly_rev_targets_list, index=quarters_index)
     
-    # --- !!! שינוי מרכזי כאן: הגדרת תאריך התחלה אפקטיבי !!! ---
     global_start_date = pd.Timestamp(f"{global_start_year}-{(global_start_quarter-1)*3 + 1}-01")
     product_launch_date = pd.Timestamp(f"{launch_year}-01-01")
     
     effective_start_date = max(global_start_date, product_launch_date)
     
     quarterly_rev_targets.loc[quarterly_rev_targets.index < effective_start_date] = 0
-    # --- סוף השינוי ---
     
-    total_focus = f_m + f_l + f_g
+    # --- עדכון: הוספת S לחישוב הפוקוס ---
+    total_focus = f_s + f_m + f_l + f_g
     if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
-    focus_norm = {'Medium': f_m / total_focus, 'Large': f_l / total_focus, 'Global': f_g / total_focus}
+    focus_norm = {'Small': f_s/total_focus, 'Medium': f_m/total_focus, 'Large': f_l/total_focus, 'Global': f_g/total_focus}
     
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     
     for i, q_date in enumerate(quarters_index):
-        # הלולאה ממשיכה כרגיל, היא תושפע מהיעדים המאופסים
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
@@ -791,49 +784,8 @@ def calculate_plan(is_m, is_l, is_g, market_gr, pen_y1, tt_m, tt_l, tt_g,
         "total_production_cost_q": total_cost_q,
         "tons_per_customer": tons_per_customer,
         "pen_rate_df": pen_rate_df,
-        "error": None
-    }
-    # 2. Create a function to find the cost per kg based on production volume
-    # This function implements the step-wise logic from your table
-    def get_cost_per_kg(tons_produced):
-        # Sort by quantity to ensure correct lookup
-        sorted_costs = sorted(zip(cost_quantities_t, cost_values_per_kg))
-        cost = sorted_costs[0][1] # Default to the lowest volume cost
-        for qty, c in sorted_costs:
-            if tons_produced >= qty:
-                cost = c
-            else:
-                break
-        return cost
-
-    # 3. Apply the function to find the cost for each quarter
-    cost_per_kg_q = total_tons_q.apply(get_cost_per_kg)
-    
-    # 4. Calculate total production cost, profit, and margin
-    total_production_cost_q = total_tons_q * cost_per_kg_q * 1000 # *1000 to convert tons to kg
-    profit_q = actual_revenue_q - total_production_cost_q
-    # Avoid division by zero for profit margin
-    profit_margin_q = (profit_q / actual_revenue_q).fillna(0) * 100
-
-    # --- END OF NEW PROFITABILITY CALCULATION ---
-
-    annual_revenue_series = actual_revenue_q.resample('YE').sum()
-    annual_revenue_series.index = years
-    annual_revenue_targets_series = pd.Series(annual_rev_targets, index=years)
-    
-    # --- Add new metrics to the return dictionary ---
-    return {
-        "cumulative_customers": cumulative_customers.round().astype(int),
-        "annual_revenue": annual_revenue_series,
-        "annual_revenue_targets": annual_revenue_targets_series,
-        "tons_per_customer": tons_per_customer,
-        "pen_rate_df": pen_rate_df,
-        "acquired_customers_plan": new_customers_plan.astype(int),
-        "revenue_per_segment_q": revenue_per_segment_q,
-        "profit_q": profit_q, # <-- NEW
-        "profit_margin_q": profit_margin_q, # <-- NEW
-        "total_production_cost_q": total_production_cost_q, # <-- NEW
-        "total_tons_q": total_tons_q, # <-- NEW
+        "lead_plan": pd.DataFrame(), # פלייסהולדר, מחושב בחוץ
+        "acquired_customers_plan": new_customers_plan,
         "error": None
     }
 
@@ -998,9 +950,14 @@ with st.sidebar:
     # --- Expander for Lead Generation Parameters ---
     with st.expander("Lead Generation Parameters (Global)"):
         lead_params = { 'success_rates': {}, 'time_aheads_in_quarters': {} }
-        customer_types_for_leads = ['Medium', 'Large', 'Global']
-        sr_defaults = {'Medium': 50, 'Large': 40, 'Global': 30}
-        ta_defaults = {'Medium': 3, 'Large': 4, 'Global': 6}
+        
+        # --- עדכון: הוספת Small לרשימת הלידים ---
+        customer_types_for_leads = ['Small', 'Medium', 'Large', 'Global']
+        
+        # --- עדכון: הגדרת ברירות המחדל החדשות (Small: 60%, 6 חודשים = 2 רבעונים) ---
+        sr_defaults = {'Small': 60, 'Medium': 50, 'Large': 40, 'Global': 30}
+        ta_defaults = {'Small': 2, 'Medium': 3, 'Large': 4, 'Global': 6}
+        
         for c_type in customer_types_for_leads:
             sr_key = f'sr_{c_type}'
             ta_key = f'ta_{c_type}'
@@ -1012,28 +969,32 @@ with st.sidebar:
     for product in st.session_state.get('products', []).copy():
         st.header(product)
         product_inputs[product] = {}
-        with st.expander(f"1. Initial Customer Value", expanded=False):
+        with st.expander(f"1. Initial Customer Value & Launch Year", expanded=False):
+            # --- עדכון: הוספת קלט עבור Small (עשירית מ-Medium כברירת מחדל) ---
+            product_inputs[product]['is_s'] = st.number_input('Initial Tons/Customer - Small:', 0.0, value=st.session_state.get(f'is_s_{product}', 0.15), step=0.01, key=f'is_s_{product}')
+            
             product_inputs[product]['is_m'] = st.number_input('Initial Tons/Customer - Medium:', 0.0, value=st.session_state.get(f'is_m_{product}', 1.5), step=0.1, key=f'is_m_{product}')
-            # ... (the rest of your expanders for product inputs)
-            # This part seems to be correct in your original code, so I'll just put a placeholder
             product_inputs[product]['is_l'] = st.number_input('Initial Tons/Customer - Large:', 0.0, value=st.session_state.get(f'is_l_{product}', 10.0), step=1.0, key=f'is_l_{product}')
             product_inputs[product]['is_g'] = st.number_input('Initial Tons/Customer - Global:', 0.0, value=st.session_state.get(f'is_g_{product}', 40.0), step=2.0, key=f'is_g_{product}')
-        with st.expander(f"1. Initial Customer Value & Launch Year", expanded=False): # (שיניתי מעט את הכותרת)
-    
-            # <<< הוסף את הקוד הזה כאן >>>
+            
             product_inputs[product]['launch_year'] = st.selectbox(
                 "Launch Year", 
                 options=[2025, 2026, 2027, 2028, 2029, 2030], 
                 index=0, 
                 key=f'launch_year_{product}'
             )
-            st.markdown("---")
+            
         with st.expander(f"2. Customer Value Growth", expanded=False):
             product_inputs[product]['market_gr'] = st.slider('Annual Market Growth Rate (%):', 0.0, 20.0, st.session_state.get(f'mgr_{product}', 6.4), 0.1, key=f'mgr_{product}')
             product_inputs[product]['pen_y1'] = st.slider('Penetration Rate Year 1 (%):', 1.0, 20.0, st.session_state.get(f'pen_y1_{product}', 7.5), 0.1, key=f'pen_y1_{product}')
+            
+            # --- עדכון: הוספת יעד עבור Small ---
+            product_inputs[product]['tt_s'] = st.number_input('Target Tons/Cust Year 5 - Small:', 0.0, value=st.session_state.get(f'tt_s_{product}', 9.0), key=f'tt_s_{product}')
+            
             product_inputs[product]['tt_m'] = st.number_input('Target Tons/Cust Year 5 - Medium:', 0.0, value=st.session_state.get(f'tt_m_{product}', 89.0), key=f'tt_m_{product}')
             product_inputs[product]['tt_l'] = st.number_input('Target Tons/Cust Year 5 - Large:', 0.0, value=st.session_state.get(f'tt_l_{product}', 223.0), key=f'tt_l_{product}')
             product_inputs[product]['tt_g'] = st.number_input('Target Tons/Cust Year 5 - Global:', 0.0, value=st.session_state.get(f'tt_g_{product}', 536.0), key=f'tt_g_{product}')
+            
         with st.expander(f"3. Revenue Targets & Sales Strategy", expanded=False):
             st.markdown("**Target Annual Revenue ($)**")
             default_revenues = [250000, 2700000, 5500000, 12000000, 32000000, 40000000]
@@ -1052,9 +1013,13 @@ with st.sidebar:
             product_inputs[product]['annual_rev_targets'] = rev_targets
             st.markdown("---")
             st.markdown("**Sales Focus (%)**")
-            product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, st.session_state.get(f'f_m_{product}', 50), 5, key=f'f_m_{product}')
-            product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, st.session_state.get(f'f_l_{product}', 30), 5, key=f'f_l_{product}')
-            product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, st.session_state.get(f'f_g_{product}', 20), 5, key=f'f_g_{product}')
+            
+            # --- עדכון: הוספת Small ושינוי ברירות המחדל (S=50%, M=30%) ---
+            product_inputs[product]['f_s'] = st.slider('Small:', 0, 100, st.session_state.get(f'f_s_{product}', 50), 5, key=f'f_s_{product}')
+            product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, st.session_state.get(f'f_m_{product}', 30), 5, key=f'f_m_{product}')
+            product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, st.session_state.get(f'f_l_{product}', 15), 5, key=f'f_l_{product}')
+            product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, st.session_state.get(f'f_g_{product}', 5), 5, key=f'f_g_{product}')
+            
         with st.expander(f"4. Pricing Assumptions", expanded=False):
             product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=st.session_state.get(f'ip_kg_{product}', 18.0), step=0.5, key=f'ip_kg_{product}')
             product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, st.session_state.get(f'pdr_{product}', 3.65), 0.05, key=f'pdr_{product}')
@@ -1062,7 +1027,6 @@ with st.sidebar:
         with st.expander(f"5. Production Costs ($/kg)", expanded=False):
             st.markdown("Define cost based on quarterly production volume (in Tons)")
             
-            # הגדרת ערכי ברירת המחדל מהתמונה
             default_quantities = [10, 20, 40, 100, 200, 1500]
             default_costs = [15.32, 13.14, 10.73, 8.46, 8.37, 7.43]
             
