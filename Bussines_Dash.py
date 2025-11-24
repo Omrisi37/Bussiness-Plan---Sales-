@@ -1107,19 +1107,85 @@ with st.sidebar:
 # --- App Logic and Display ---
 if run_button:
     results_data = {}
-    # Use a copy of the list to avoid issues if it's modified
-    for product in st.session_state.get('products', []).copy():
-        res = calculate_plan(**product_inputs[product], global_start_year=model_start_year, global_start_quarter=model_start_quarter)
+    products_list = st.session_state.get('products', []).copy()
+    
+    # שלב 1: חישוב ראשוני עבור כל המוצרים (כדי להשיג את הכמויות)
+    for product in products_list:
+        # שליפת נתוני הקלט
+        inputs = product_inputs[product]
+        
+        # הרצת החישוב (העלות שתחושב פה היא זמנית ותתוקן בהמשך)
+        res = calculate_plan(
+            **inputs, 
+            global_start_year=model_start_year, 
+            global_start_quarter=model_start_quarter
+        )
+        
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
         
+        # חישוב הלידים (לא משתנה)
         final_cumulative = res["cumulative_customers"].round().astype(int)
         acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
-        
         res['acquired_customers_plan'] = acquired_customers
         res['cumulative_customers'] = final_cumulative
         res['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
+        
         results_data[product] = res
+
+    # --- שלב 2: תיקון עלויות ייצור לפי נפח גלובלי (כלל המוצרים) ---
+    
+    # א. יצירת טבלה שמסכמת את כל הטונות מכל המוצרים בכל רבעון
+    all_tons_df = pd.DataFrame({
+        p: res['tons_by_type_q'].sum(axis=1) for p, res in results_data.items()
+    })
+    # סכום הטונות הגלובלי לכל רבעון (Product A + Product B + ...)
+    global_tons_q = all_tons_df.sum(axis=1)
+
+    # ב. חישוב מחדש של העלויות והרווח לכל מוצר
+    for product in products_list:
+        res = results_data[product]
+        
+        # שליפת טבלת העלויות הספציפית של המוצר הזה
+        cost_quantities = product_inputs[product]['cost_quantities_t']
+        cost_values = product_inputs[product]['cost_values_per_kg']
+        
+        # מיון בטוח של טבלת העלויות (למקרה שהמשתמש הזין לא לפי הסדר)
+        cost_pairs = sorted(zip(cost_quantities, cost_values))
+        sorted_cost_quantities = [c[0] for c in cost_pairs]
+        sorted_cost_values = [c[1] for c in cost_pairs]
+        
+        # סדרה חדשה לעלות לק"ג (מחושבת לפי הנפח הגלובלי!)
+        new_cost_per_ton_q = pd.Series(0.0, index=res['total_production_cost_q'].index)
+        
+        # הטונות של המוצר הספציפי הזה (עליהן נכפיל את המחיר)
+        product_specific_tons_q = res['tons_by_type_q'].sum(axis=1)
+
+        for q_date in global_tons_q.index:
+            # 1. בודקים איזה מדרגת מחיר תופסת לפי *הנפח הגלובלי*
+            current_global_tons = global_tons_q.loc[q_date]
+            
+            if current_global_tons > 0:
+                cost_idx = np.searchsorted(sorted_cost_quantities, current_global_tons, side='right') - 1
+                cost_per_kg = sorted_cost_values[cost_idx] if cost_idx >= 0 else sorted_cost_values[0]
+            else:
+                cost_per_kg = sorted_cost_values[0]
+            
+            # 2. שומרים את העלות לטון (המחיר לק"ג * 1000)
+            new_cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
+            
+        # ג. עדכון התוצאות בתוך המילון
+        # עלות כוללת = כמות ספציפית של המוצר * מחיר שנקבע לפי הכמות הכללית
+        res['total_production_cost_q'] = product_specific_tons_q * new_cost_per_ton_q
+        
+        # חישוב רווח מחדש: הכנסות (ללא שינוי) פחות העלות החדשה
+        total_revenue_q = res['revenue_by_type_q'].sum(axis=1) # המרה לדולרים כבר בוצעה בפונקציה
+        res['profit_q'] = total_revenue_q - res['total_production_cost_q']
+        
+        # עדכון המילון הראשי
+        results_data[product] = res
+
+    # שמירה ל-Session State
     st.session_state.results = results_data
 
 # <<< החלף את כל קוד התצוגה שלך (מ-if st.session_state.results: ועד הסוף) בקוד המלא הבא >>>
