@@ -633,7 +633,7 @@ def load_scenario_data(user_id, scenario_name):
 
 def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_s, f_m, f_l, f_g, 
-                   price_quantities_t, price_values_per_kg, # <--- פרמטרים חדשים למחיר
+                   price_quantities_t, price_values_per_kg,
                    cost_quantities_t, cost_values_per_kg,
                    global_start_year, global_start_quarter, launch_year, 
                    global_delay_year):
@@ -647,11 +647,17 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     customer_types = ['Small', 'Medium', 'Large', 'Global']
     
-    # --- הכנת נתוני המחיר (מיון) ---
-    # ממיינים את טבלת המחירים כדי שהחיפוש יעבוד נכון
-    sorted_price_quantities = sorted(price_quantities_t)
-    # התאמת המחירים לפי הסדר של הכמויות הממוינות
-    sorted_price_values = [price_values_per_kg[price_quantities_t.index(q)] for q in sorted_price_quantities]
+    # --- תיקון קריטי: מיון בטוח של המחירון ---
+    # אנחנו מחברים את הכמות והמחיר לזוגות, ממיינים לפי כמות, ואז מפרידים חזרה
+    # זה מבטיח שאם המשתמש הזין בסדר מבולגן, המחשב יבין נכון
+    price_pairs = sorted(zip(price_quantities_t, price_values_per_kg))
+    sorted_price_quantities = [p[0] for p in price_pairs]
+    sorted_price_values = [p[1] for p in price_pairs]
+
+    # מיון עלויות ייצור (אותו עיקרון)
+    cost_pairs = sorted(zip(cost_quantities_t, cost_values_per_kg))
+    sorted_cost_quantities = [c[0] for c in cost_pairs]
+    sorted_cost_values = [c[1] for c in cost_pairs]
     
     # --- חלק 1: חישוב מנועי הערך (ללא שינוי) ---
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
@@ -688,7 +694,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     pen_rate_df = pen_rate_df_relative if launch_year <= last_model_year else pd.DataFrame(0.0, index=range(1, NUM_YEARS + 1), columns=customer_types)
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
 
-    # --- חלק 2: מנוע החישוב ההפוך (עם מחיר דינמי) ---
+    # --- חלק 2: מנוע החישוב ההפוך ---
     Q_GROWTH_RATE = 0.10
     growth_factors = np.array([1, (1 + Q_GROWTH_RATE), (1 + Q_GROWTH_RATE)**2, (1 + Q_GROWTH_RATE)**3])
     quarterly_weights = growth_factors / growth_factors.sum()
@@ -704,12 +710,9 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
-    
-    # סדרה לשמירת המחיר שנקבע בכל רבעון (לצורך דיווח)
     final_price_per_ton_q = pd.Series(0.0, index=quarters_index) 
 
     for i, q_date in enumerate(quarters_index):
-        # 1. לוגיקת Global Delay
         if q_date.year < global_delay_year:
             current_f_g = 0
         else:
@@ -720,24 +723,25 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         else:
             focus_norm = {'Small': 0, 'Medium': 0, 'Large': 0, 'Global': 0}
 
-        # 2. חישוב טונות קיימות (לפני גיוס חדש) לקביעת מחיר
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         current_tons_per_cust = tons_per_cust_q.loc[q_date]
         
-        # סך הטונות שייוצרו על ידי הלקוחות שכבר יש לנו
+        # חישוב הנפח הקובע את המחיר (נפח מלקוחות קיימים)
         existing_tons_vol = (prev_cumulative * current_tons_per_cust).sum()
         
-        # 3. קביעת מחיר המכירה לרבעון זה על בסיס הנפח הקיים
-        if existing_tons_vol > 0:
-            p_idx = np.searchsorted(sorted_price_quantities, existing_tons_vol, side='right') - 1
-            current_price_kg = sorted_price_values[p_idx] if p_idx >= 0 else sorted_price_values[0]
+        # שליפת המחיר המתאים
+        if sorted_price_quantities: # מוודא שיש מחירון
+            if existing_tons_vol > 0:
+                p_idx = np.searchsorted(sorted_price_quantities, existing_tons_vol, side='right') - 1
+                current_price_kg = sorted_price_values[p_idx] if p_idx >= 0 else sorted_price_values[0]
+            else:
+                # ברבעון הראשון, או כשאין מכירות, לוקחים את המחיר של כמות 0 (או הכי נמוכה)
+                current_price_kg = sorted_price_values[0]
         else:
-            # אם אין נפח בכלל (רבעון ראשון), לוקחים את המחיר של המדרגה הראשונה
-            current_price_kg = sorted_price_values[0]
+             current_price_kg = 0 # Fallback safety
             
-        final_price_per_ton_q.loc[q_date] = current_price_kg * 1000 # המרה לטון
+        final_price_per_ton_q.loc[q_date] = current_price_kg * 1000
 
-        # 4. חישוב הפער והגיוס
         value_per_customer_type = current_tons_per_cust * (current_price_kg * 1000)
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
@@ -751,26 +755,21 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                     
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
 
-    # --- חלק 3: חישוב פלטים סופיים (חישוב חוזר מדויק) ---
-    # כאן אנחנו מחשבים את ההכנסה הסופית לפי המחיר שנקבע
+    # --- חישוב פלטים ---
     revenue_per_customer_type_q = tons_per_cust_q.mul(final_price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
 
     tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
-    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q / 1000, axis=0) # חלוקה ב-1000 כדי לחזור לדולר
+    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q / 1000, axis=0)
     
     total_tons_q = tons_by_type_q.sum(axis=1)
     
-    # חישוב עלויות ייצור (נשאר זהה)
     cost_per_ton_q = pd.Series(0.0, index=quarters_index)
-    sorted_quantities = sorted(cost_quantities_t)
-    sorted_values = [cost_values_per_kg[cost_quantities_t.index(q)] for q in sorted_quantities]
-
     for i, q_date in enumerate(quarters_index):
         tons_sold = total_tons_q.loc[q_date]
         if tons_sold > 0:
-            cost_idx = np.searchsorted(sorted_quantities, tons_sold, side='right') -1
-            cost_per_kg = sorted_values[cost_idx] if cost_idx >= 0 else sorted_values[0]
+            cost_idx = np.searchsorted(sorted_cost_quantities, tons_sold, side='right') -1
+            cost_per_kg = sorted_cost_values[cost_idx] if cost_idx >= 0 else sorted_cost_values[0]
             cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
     
     total_cost_q = total_tons_q * cost_per_ton_q
@@ -790,6 +789,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         "pen_rate_df": pen_rate_df,
         "lead_plan": pd.DataFrame(),
         "acquired_customers_plan": new_customers_plan,
+        "final_price_per_kg_series": final_price_per_ton_q / 1000, # הוספת הנתון לבקרה
         "error": None
     }
 
