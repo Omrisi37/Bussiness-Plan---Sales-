@@ -632,10 +632,11 @@ def load_scenario_data(user_id, scenario_name):
         return None
 
 def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, tt_g, 
-                   annual_rev_targets, f_s, f_m, f_l, f_g, ip_kg, pdr, price_floor,
+                   annual_rev_targets, f_s, f_m, f_l, f_g, 
+                   price_quantities_t, price_values_per_kg, # <--- פרמטרים חדשים למחיר
                    cost_quantities_t, cost_values_per_kg,
                    global_start_year, global_start_quarter, launch_year, 
-                   global_delay_year): # <--- הוספנו את הפרמטר הזה כאן
+                   global_delay_year):
 
     # הגדרות כלליות
     MODEL_START_YEAR = 2025
@@ -646,21 +647,21 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     customer_types = ['Small', 'Medium', 'Large', 'Global']
     
-    # --- חלק 1: חישוב מנועי הערך (עם לוגיקת השקה דינמית) ---
+    # --- הכנת נתוני המחיר (מיון) ---
+    # ממיינים את טבלת המחירים כדי שהחיפוש יעבוד נכון
+    sorted_price_quantities = sorted(price_quantities_t)
+    # התאמת המחירים לפי הסדר של הכמויות הממוינות
+    sorted_price_values = [price_values_per_kg[price_quantities_t.index(q)] for q in sorted_price_quantities]
+    
+    # --- חלק 1: חישוב מנועי הערך (ללא שינוי) ---
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
     last_model_year = years[-1]
     
-    # אם שנת ההשקה היא אחרי תקופת המודל, כל החישובים יהיו אפס
     if launch_year <= last_model_year:
         tons_per_customer.loc[launch_year] = [is_s, is_m, is_l, is_g]
-
-        # חישוב תקופת המכירה האמיתית של המוצר
         sales_duration_years = last_model_year - launch_year + 1
-        
         initial_tons = {'Small': is_s, 'Medium': is_m, 'Large': is_l, 'Global': is_g}
         target_tons = {'Small': tt_s, 'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
-        
-        # אינדקס יחסי לתקופת המכירה
         relative_year_index = range(1, sales_duration_years + 1)
         pen_rate_df_relative = pd.DataFrame(index=relative_year_index, columns=customer_types)
 
@@ -668,21 +669,16 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
             total_market_growth_factor = (1 + market_gr / 100) ** (sales_duration_years - 1)
             if initial_tons[c_type] == 0: required_pen_growth_factor = 1.0
             else: required_pen_growth_factor = (target_tons[c_type] / initial_tons[c_type]) / total_market_growth_factor
-            
             pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
-            
             interp_points_x = [1, sales_duration_years / 2, sales_duration_years] if sales_duration_years > 2 else [1, sales_duration_years]
             interp_points_y = [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final] if sales_duration_years > 2 else [pen_y1 / 100, pen_rate_y_final]
-            
             interp_func = PchipInterpolator(interp_points_x, interp_points_y)
             pen_rate_df_relative[c_type] = interp_func(relative_year_index)
 
-        # הרצת לולאת הצמיחה
         launch_year_index_in_years_array = list(years).index(launch_year)
         for i in range(launch_year_index_in_years_array, NUM_YEARS - 1):
             current_year, prev_year = years[i+1], years[i]
             relative_idx_current, relative_idx_prev = i - launch_year_index_in_years_array + 2, i - launch_year_index_in_years_array + 1
-            
             for c_type in customer_types:
                 prev_tons = tons_per_customer.loc[prev_year, c_type]
                 market_growth_factor = (1 + market_gr / 100)
@@ -690,28 +686,15 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                 tons_per_customer.loc[current_year, c_type] = prev_tons * market_growth_factor * pen_growth_factor
     
     pen_rate_df = pen_rate_df_relative if launch_year <= last_model_year else pd.DataFrame(0.0, index=range(1, NUM_YEARS + 1), columns=customer_types)
-
-    # --- חישוב מחירים ---
-    prices = []
-    current_price = ip_kg
-    decay_rate = pdr / 100.0
-    for _ in quarters_index:
-        prices.append(current_price)
-        next_price = current_price * (1 - decay_rate)
-        current_price = max(next_price, price_floor)
-        
-    price_per_ton_q = pd.Series(prices, index=quarters_index) * 1000
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
 
-    # --- חלק 2: מנוע החישוב ההפוך (Top-Down) ---
+    # --- חלק 2: מנוע החישוב ההפוך (עם מחיר דינמי) ---
     Q_GROWTH_RATE = 0.10
     growth_factors = np.array([1, (1 + Q_GROWTH_RATE), (1 + Q_GROWTH_RATE)**2, (1 + Q_GROWTH_RATE)**3])
     quarterly_weights = growth_factors / growth_factors.sum()
-    
     quarterly_rev_targets_list = []
     for yearly_target in annual_rev_targets:
         quarterly_rev_targets_list.extend(yearly_target * quarterly_weights)
-    
     quarterly_rev_targets = pd.Series(quarterly_rev_targets_list, index=quarters_index)
     
     global_start_date = pd.Timestamp(f"{global_start_year}-{(global_start_quarter-1)*3 + 1}-01")
@@ -722,31 +705,40 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     
-    # --- תחילת הלולאה הראשית עם התיקון של Global Delay ---
+    # סדרה לשמירת המחיר שנקבע בכל רבעון (לצורך דיווח)
+    final_price_per_ton_q = pd.Series(0.0, index=quarters_index) 
+
     for i, q_date in enumerate(quarters_index):
-        
-        # 1. בדיקה האם הגענו לשנת הגיוס של גלובל
+        # 1. לוגיקת Global Delay
         if q_date.year < global_delay_year:
-            current_f_g = 0 # אם אנחנו לפני השנה, אין מיקוד בגלובל
+            current_f_g = 0
         else:
-            current_f_g = f_g # אחרת, המיקוד הוא מה שהוגדר
-            
-        # 2. חישוב הפוקוס היחסי לרבעון זה
+            current_f_g = f_g
         current_total_focus = f_s + f_m + f_l + current_f_g
-        
         if current_total_focus > 0:
-            focus_norm = {
-                'Small': f_s / current_total_focus,
-                'Medium': f_m / current_total_focus,
-                'Large': f_l / current_total_focus,
-                'Global': current_f_g / current_total_focus
-            }
+            focus_norm = {'Small': f_s/current_total_focus, 'Medium': f_m/current_total_focus, 'Large': f_l/current_total_focus, 'Global': current_f_g/current_total_focus}
         else:
             focus_norm = {'Small': 0, 'Medium': 0, 'Large': 0, 'Global': 0}
 
-        # 3. המשך החישוב הרגיל
+        # 2. חישוב טונות קיימות (לפני גיוס חדש) לקביעת מחיר
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
-        value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
+        current_tons_per_cust = tons_per_cust_q.loc[q_date]
+        
+        # סך הטונות שייוצרו על ידי הלקוחות שכבר יש לנו
+        existing_tons_vol = (prev_cumulative * current_tons_per_cust).sum()
+        
+        # 3. קביעת מחיר המכירה לרבעון זה על בסיס הנפח הקיים
+        if existing_tons_vol > 0:
+            p_idx = np.searchsorted(sorted_price_quantities, existing_tons_vol, side='right') - 1
+            current_price_kg = sorted_price_values[p_idx] if p_idx >= 0 else sorted_price_values[0]
+        else:
+            # אם אין נפח בכלל (רבעון ראשון), לוקחים את המחיר של המדרגה הראשונה
+            current_price_kg = sorted_price_values[0]
+            
+        final_price_per_ton_q.loc[q_date] = current_price_kg * 1000 # המרה לטון
+
+        # 4. חישוב הפער והגיוס
+        value_per_customer_type = current_tons_per_cust * (current_price_kg * 1000)
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
         revenue_gap = quarterly_rev_targets.loc[q_date] - revenue_from_existing
         
@@ -759,15 +751,17 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                     
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
 
-    # --- חלק 3: חישוב פלטים סופיים ---
-    revenue_per_customer_type_q = tons_per_cust_q.mul(price_per_ton_q, axis=0)
+    # --- חלק 3: חישוב פלטים סופיים (חישוב חוזר מדויק) ---
+    # כאן אנחנו מחשבים את ההכנסה הסופית לפי המחיר שנקבע
+    revenue_per_customer_type_q = tons_per_cust_q.mul(final_price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
 
     tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
-    revenue_by_type_q = tons_by_type_q.mul(price_per_ton_q / 1000, axis=0)
+    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q / 1000, axis=0) # חלוקה ב-1000 כדי לחזור לדולר
     
     total_tons_q = tons_by_type_q.sum(axis=1)
     
+    # חישוב עלויות ייצור (נשאר זהה)
     cost_per_ton_q = pd.Series(0.0, index=quarters_index)
     sorted_quantities = sorted(cost_quantities_t)
     sorted_values = [cost_values_per_kg[cost_quantities_t.index(q)] for q in sorted_quantities]
@@ -1039,10 +1033,39 @@ with st.sidebar:
                 key=f'g_delay_{product}'
             )
             
-        with st.expander(f"4. Pricing Assumptions", expanded=False):
-            product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=st.session_state.get(f'ip_kg_{product}', 18.0), step=0.5, key=f'ip_kg_{product}')
-            product_inputs[product]['pdr'] = st.slider('Quarterly Price Decay (%):', 0.0, 10.0, st.session_state.get(f'pdr_{product}', 3.65), 0.05, key=f'pdr_{product}')
-            product_inputs[product]['price_floor'] = st.number_input('Minimum Price ($):', 0.0, value=st.session_state.get(f'price_floor_{product}', 14.0), step=0.5, key=f'price_floor_{product}')
+        with st.expander(f"4. Pricing Assumptions (Volume Based)", expanded=False):
+            st.markdown("Define Selling Price based on quarterly sales volume (Tons)")
+            st.caption("Price is determined by total volume at the start of the quarter.")
+            
+            # ברירות מחדל (דוגמה: ככל שמוכרים יותר, המחיר יורד)
+            default_p_quantities = [0, 10, 20, 40, 100, 500, 1500, 3000, 6000]
+            default_p_values = [217.85, 15.12,14.02, 12.31, 9.06, 8.15, 7.34,6.60, 6.27]
+            
+            price_quantities = []
+            price_values = []
+            
+            # עיצוב של 2 שורות * 5 עמודות
+            cols_top_p = st.columns(5)
+            cols_bottom_p = st.columns(5)
+            all_cols_p = cols_top_p + cols_bottom_p
+            
+            for i, col in enumerate(all_cols_p):
+                with col:
+                    pq_key = f'price_q_{i}_{product}'
+                    pv_key = f'price_v_{i}_{product}'
+                    
+                    saved_pq = st.session_state.get(pq_key, default_p_quantities[i])
+                    saved_pv = st.session_state.get(pv_key, default_p_values[i])
+
+                    p_qty = st.number_input(f"Tons {i+1}", value=float(saved_pq), key=pq_key)
+                    p_val = st.number_input(f"Price {i+1}", value=float(saved_pv), format="%.2f", key=pv_key)
+                    
+                    if p_qty > 0:
+                        price_quantities.append(p_qty)
+                        price_values.append(p_val)
+            
+            product_inputs[product]['price_quantities_t'] = price_quantities
+            product_inputs[product]['price_values_per_kg'] = price_values
         with st.expander(f"5. Production Costs ($/kg)", expanded=False):
             st.markdown("Define cost based on quarterly production volume (in Tons)")
             
