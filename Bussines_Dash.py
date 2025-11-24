@@ -1046,7 +1046,7 @@ with st.sidebar:
         with st.expander(f"5. Production Costs ($/kg)", expanded=False):
             st.markdown("Define cost based on quarterly production volume (in Tons)")
             
-            default_quantities = [0-10, 10-20, 20-40, 40-100, 100-500, 500-1500, 1500-3000, 3000-6000,6000+]
+            default_quantities = [0, 10, 20, 40, 100, 500, 1500, 3000,6000]
             default_costs = [17.85, 15.12,14.02, 12.31, 9.06, 8.15, 7.34,6.60, 6.27]
             
             cost_quantities = []
