@@ -1048,36 +1048,42 @@ with st.sidebar:
             price_quantities = []
             price_values = []
             
-            # --- 2. יצירת גריד של 3x3 (סה"כ 9 תאים) ---
+            # --- עיצוב מרווח: 3 שורות שבכל אחת 3 עמודות ---
+            # זה ימנע את הצפיפות שראית בתמונה
             row1 = st.columns(3)
             row2 = st.columns(3)
             row3 = st.columns(3)
             
-            # איחוד כל השורות לרשימה אחת שטוחה כדי לרוץ בלולאה
+            # איחוד כל השורות לרשימה אחת שטוחה כדי לרוץ עליהן בלולאה
             all_cols_p = row1 + row2 + row3
             
             for i, col in enumerate(all_cols_p):
                 with col:
+                    # יצירת מפתחות ייחודיים לכל שדה
                     pq_key = f'price_q_{i}_{product}'
                     pv_key = f'price_v_{i}_{product}'
                     
-                    # שליפת ברירת המחדל לפי האינדקס, או 0 אם חורג (לביטחון)
+                    # שליפת נתונים קיימים או ברירת מחדל
                     def_q = default_p_quantities[i] if i < len(default_p_quantities) else 0.0
                     def_v = default_p_values[i] if i < len(default_p_values) else 0.0
                     
                     saved_pq = st.session_state.get(pq_key, def_q)
                     saved_pv = st.session_state.get(pv_key, def_v)
 
+                    # הצגת השדות
                     p_qty = st.number_input(f"Tons {i+1}", value=float(saved_pq), key=pq_key)
                     p_val = st.number_input(f"Price {i+1}", value=float(saved_pv), format="%.2f", key=pv_key)
                     
-                    # אנחנו שומרים את הערך אם המחיר גדול מ-0 (כדי לאפשר כמות 0 בהתחלה)
+                    # שמירה ברשימות לחישוב (רק אם המחיר חיובי)
+                    # הערה: אנחנו מאפשרים כמות 0 (עבור מחיר בסיס), ולכן בודקים p_val > 0
                     if p_val > 0:
                         price_quantities.append(p_qty)
                         price_values.append(p_val)
             
+            # שמירת הנתונים הסופיים להעברה לפונקציית החישוב
             product_inputs[product]['price_quantities_t'] = price_quantities
             product_inputs[product]['price_values_per_kg'] = price_values
+            
         with st.expander(f"5. Production Costs ($/kg)", expanded=False):
             st.markdown("Define cost based on quarterly production volume (in Tons)")
             
