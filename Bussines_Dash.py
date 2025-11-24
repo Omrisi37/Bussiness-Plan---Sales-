@@ -636,7 +636,11 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                    price_quantities_t, price_values_per_kg,
                    cost_quantities_t, cost_values_per_kg,
                    global_start_year, global_start_quarter, launch_year, 
-                   global_delay_year):
+                   global_delay_year,
+                   # --- פרמטרים חדשים לסנכרון גלובלי ---
+                   external_global_cumulative_vol=None, # לקביעת מחיר מכירה
+                   external_global_quarterly_sales=None # לקביעת עלות ייצור
+                   ):
 
     # הגדרות כלליות
     MODEL_START_YEAR = 2025
@@ -647,7 +651,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     customer_types = ['Small', 'Medium', 'Large', 'Global']
     
-    # מיון נתונים
+    # מיון מחירונים ועלויות
     price_pairs = sorted(zip(price_quantities_t, price_values_per_kg))
     sorted_price_quantities = [p[0] for p in price_pairs]
     sorted_price_values = [p[1] for p in price_pairs]
@@ -656,7 +660,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     sorted_cost_quantities = [c[0] for c in cost_pairs]
     sorted_cost_values = [c[1] for c in cost_pairs]
     
-    # --- חלק 1: חישוב מנועי הערך ---
+    # --- חלק 1: חישוב מנועי הערך (ללא שינוי) ---
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
     last_model_year = years[-1]
     
@@ -724,12 +728,23 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         current_tons_per_cust = tons_per_cust_q.loc[q_date]
         
-        # מחיר לפי נפח קיים
-        existing_tons_vol = (prev_cumulative * current_tons_per_cust).sum()
+        # --- !!! השינוי המרכזי במחיר !!! ---
+        if external_global_cumulative_vol is not None:
+            # אם קיבלנו נתונים חיצוניים (סבב ב'), נשתמש בהם לקביעת המחיר
+            # לוקחים את הצבירה עד סוף הרבעון הקודם
+            if i > 0:
+                prev_q_date = quarters_index[i-1]
+                volume_for_price = external_global_cumulative_vol.loc[prev_q_date]
+            else:
+                volume_for_price = 0
+        else:
+            # אם לא (סבב א'), נשתמש בנתונים הפנימיים
+            volume_for_price = (prev_cumulative * current_tons_per_cust).sum()
         
+        # שליפת המחיר
         if sorted_price_quantities:
-            if existing_tons_vol > 0:
-                p_idx = np.searchsorted(sorted_price_quantities, existing_tons_vol, side='right') - 1
+            if volume_for_price > 0:
+                p_idx = np.searchsorted(sorted_price_quantities, volume_for_price, side='right') - 1
                 current_price_kg = sorted_price_values[p_idx] if p_idx >= 0 else sorted_price_values[0]
             else:
                 current_price_kg = sorted_price_values[0]
@@ -751,25 +766,27 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                     
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
 
-    # --- חלק 3: חישוב פלטים - התיקון הקריטי כאן ---
-    
-    # חישוב הכנסות מדויק: טונות * מחיר לטון (ללא חילוק ב-1000)
+    # --- חלק 3: חישוב פלטים ---
     revenue_per_customer_type_q = tons_per_cust_q.mul(final_price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
 
     tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
-    
-    # פירוט הכנסות לפי סוג לקוח (גם כאן ללא חילוק ב-1000)
-    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q, axis=0) 
+    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q, axis=0)
     
     total_tons_q = tons_by_type_q.sum(axis=1)
     
-    # חישוב עלויות ראשוני (יעודכן ב-Post Processing)
+    # --- !!! השינוי המרכזי בעלות !!! ---
     cost_per_ton_q = pd.Series(0.0, index=quarters_index)
     for i, q_date in enumerate(quarters_index):
-        tons_sold = total_tons_q.loc[q_date]
-        if tons_sold > 0:
-            cost_idx = np.searchsorted(sorted_cost_quantities, tons_sold, side='right') -1
+        if external_global_quarterly_sales is not None:
+             # שימוש בנפח הגלובלי החיצוני (סבב ב')
+             volume_for_cost = external_global_quarterly_sales.loc[q_date]
+        else:
+             # שימוש בנפח הפנימי (סבב א')
+             volume_for_cost = total_tons_q.loc[q_date]
+
+        if volume_for_cost > 0:
+            cost_idx = np.searchsorted(sorted_cost_quantities, volume_for_cost, side='right') -1
             cost_per_kg = sorted_cost_values[cost_idx] if cost_idx >= 0 else sorted_cost_values[0]
             cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
     
@@ -1116,69 +1133,60 @@ if run_button:
     results_data = {}
     products_list = st.session_state.get('products', []).copy()
     
-    # שלב 1: חישוב ראשוני
+    # --- סבב 1: חישוב ראשוני (הערכה) ---
+    # מטרת הסבב: להבין כמה טונות כל מוצר מייצר באופן עצמאי
+    temp_results = {}
+    for product in products_list:
+        inputs = product_inputs[product]
+        res = calculate_plan(
+            **inputs, 
+            global_start_year=model_start_year, 
+            global_start_quarter=model_start_quarter,
+            external_global_cumulative_vol=None, # ללא השפעה חיצונית
+            external_global_quarterly_sales=None
+        )
+        if res.get("error"): st.error(f"Error for {product}: {res['error']}"); st.stop()
+        temp_results[product] = res
+
+    # --- יצירת הנתונים הגלובליים ---
+    # 1. טבלה של סך כל הטונות הנמכרות ברבעון (עבור עלות ייצור)
+    all_quarterly_sales_df = pd.DataFrame({
+        p: res['tons_by_type_q'].sum(axis=1) for p, res in temp_results.items()
+    })
+    global_quarterly_sales_q = all_quarterly_sales_df.sum(axis=1)
+    
+    # 2. טבלה של סך כל הטונות המצטברות של לקוחות קיימים (עבור מחיר מכירה)
+    # צריך לחשב עבור כל מוצר את "נפח הלקוחות הקיימים" שלו ואז לסכום
+    all_cumulative_vol_df = pd.DataFrame()
+    for product in products_list:
+        res = temp_results[product]
+        # חישוב נפח מצטבר למוצר ספציפי
+        # (לקוחות מצטברים * טונות ללקוח)
+        prod_vol = (res['cumulative_customers'] * res['tons_per_customer'].loc[res['cumulative_customers'].index.year].set_axis(res['cumulative_customers'].index) / 4).sum(axis=1)
+        all_cumulative_vol_df[product] = prod_vol
+        
+    global_cumulative_vol_q = all_cumulative_vol_df.sum(axis=1)
+
+    # --- סבב 2: חישוב סופי ומדויק ---
+    # הפעם מזינים את הנתונים הגלובליים פנימה. כל מוצר "יראה" את הנפח של כולם.
     for product in products_list:
         inputs = product_inputs[product]
         
         res = calculate_plan(
             **inputs, 
             global_start_year=model_start_year, 
-            global_start_quarter=model_start_quarter
+            global_start_quarter=model_start_quarter,
+            # הזרקת הנתונים הגלובליים:
+            external_global_cumulative_vol=global_cumulative_vol_q, 
+            external_global_quarterly_sales=global_quarterly_sales_q
         )
         
-        if res.get("error"):
-            st.error(f"Error for {product}: {res['error']}"); st.stop()
-        
+        # השלמת חישובים משניים (לידים וכו')
         final_cumulative = res["cumulative_customers"].round().astype(int)
         acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
         res['acquired_customers_plan'] = acquired_customers
         res['cumulative_customers'] = final_cumulative
         res['lead_plan'] = create_lead_plan(acquired_customers, **lead_params)
-        
-        results_data[product] = res
-
-    # --- שלב 2: תיקון עלויות ייצור לפי נפח גלובלי (Economies of Scale) ---
-    
-    # א. סכימת הטונות של כל המוצרים יחד לכל רבעון
-    all_tons_df = pd.DataFrame({
-        p: res['tons_by_type_q'].sum(axis=1) for p, res in results_data.items()
-    })
-    global_tons_q = all_tons_df.sum(axis=1)
-
-    # ב. חישוב מחדש של העלויות
-    for product in products_list:
-        res = results_data[product]
-        
-        # טעינת טבלת העלויות של המוצר
-        cost_quantities = product_inputs[product]['cost_quantities_t']
-        cost_values = product_inputs[product]['cost_values_per_kg']
-        
-        # מיון
-        cost_pairs = sorted(zip(cost_quantities, cost_values))
-        sorted_cost_quantities = [c[0] for c in cost_pairs]
-        sorted_cost_values = [c[1] for c in cost_pairs]
-        
-        new_cost_per_ton_q = pd.Series(0.0, index=res['total_production_cost_q'].index)
-        product_specific_tons_q = res['tons_by_type_q'].sum(axis=1)
-
-        # לולאה לקביעת המחיר לפי הנפח הגלובלי
-        for q_date in global_tons_q.index:
-            current_global_tons = global_tons_q.loc[q_date]
-            
-            if current_global_tons > 0:
-                cost_idx = np.searchsorted(sorted_cost_quantities, current_global_tons, side='right') - 1
-                cost_per_kg = sorted_cost_values[cost_idx] if cost_idx >= 0 else sorted_cost_values[0]
-            else:
-                cost_per_kg = sorted_cost_values[0]
-            
-            new_cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
-            
-        # עדכון העלות הכוללת והרווח
-        res['total_production_cost_q'] = product_specific_tons_q * new_cost_per_ton_q
-        
-        # חישוב רווח מעודכן: (הכנסה מתוקנת מהשלב ה-1) פחות (עלות גלובלית מהשלב ה-2)
-        total_revenue_q = res['revenue_by_type_q'].sum(axis=1)
-        res['profit_q'] = total_revenue_q - res['total_production_cost_q']
         
         results_data[product] = res
 
