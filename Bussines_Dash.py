@@ -1039,28 +1039,40 @@ with st.sidebar:
             
             # ברירות מחדל (דוגמה: ככל שמוכרים יותר, המחיר יורד)
             default_p_quantities = [0, 10, 20, 40, 100, 500, 1500, 3000, 6000]
-            default_p_values = [217.85, 15.12,14.02, 12.31, 9.06, 8.15, 7.34,6.60, 6.27]
+            default_p_values = [18,18, 18, 16, 15, 15,14,13,12]
             
             price_quantities = []
             price_values = []
             
             # עיצוב של 2 שורות * 5 עמודות
-            cols_top_p = st.columns(5)
-            cols_bottom_p = st.columns(5)
-            all_cols_p = cols_top_p + cols_bottom_p
+            price_quantities = []
+            price_values = []
+            
+            # --- 2. יצירת גריד של 3x3 (סה"כ 9 תאים) ---
+            row1 = st.columns(3)
+            row2 = st.columns(3)
+            row3 = st.columns(3)
+            
+            # איחוד כל השורות לרשימה אחת שטוחה כדי לרוץ בלולאה
+            all_cols_p = row1 + row2 + row3
             
             for i, col in enumerate(all_cols_p):
                 with col:
                     pq_key = f'price_q_{i}_{product}'
                     pv_key = f'price_v_{i}_{product}'
                     
-                    saved_pq = st.session_state.get(pq_key, default_p_quantities[i])
-                    saved_pv = st.session_state.get(pv_key, default_p_values[i])
+                    # שליפת ברירת המחדל לפי האינדקס, או 0 אם חורג (לביטחון)
+                    def_q = default_p_quantities[i] if i < len(default_p_quantities) else 0.0
+                    def_v = default_p_values[i] if i < len(default_p_values) else 0.0
+                    
+                    saved_pq = st.session_state.get(pq_key, def_q)
+                    saved_pv = st.session_state.get(pv_key, def_v)
 
                     p_qty = st.number_input(f"Tons {i+1}", value=float(saved_pq), key=pq_key)
                     p_val = st.number_input(f"Price {i+1}", value=float(saved_pv), format="%.2f", key=pv_key)
                     
-                    if p_qty > 0:
+                    # אנחנו שומרים את הערך אם המחיר גדול מ-0 (כדי לאפשר כמות 0 בהתחלה)
+                    if p_val > 0:
                         price_quantities.append(p_qty)
                         price_values.append(p_val)
             
