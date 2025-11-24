@@ -634,7 +634,8 @@ def load_scenario_data(user_id, scenario_name):
 def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, tt_g, 
                    annual_rev_targets, f_s, f_m, f_l, f_g, ip_kg, pdr, price_floor,
                    cost_quantities_t, cost_values_per_kg,
-                   global_start_year, global_start_quarter, launch_year):
+                   global_start_year, global_start_quarter, launch_year, 
+                   global_delay_year): # <--- הוספנו את הפרמטר הזה כאן
 
     # הגדרות כלליות
     MODEL_START_YEAR = 2025
@@ -643,24 +644,19 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     years = np.array([CALCULATION_START_YEAR + i for i in range(NUM_YEARS)])
     quarters_index = pd.date_range(start=f'{CALCULATION_START_YEAR}-01-01', periods=NUM_YEARS*4, freq='QE')
     
-    # --- עדכון: הוספת Small לרשימת הלקוחות ---
     customer_types = ['Small', 'Medium', 'Large', 'Global']
     
     # --- חלק 1: חישוב מנועי הערך (עם לוגיקת השקה דינמית) ---
-    
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
-    
     last_model_year = years[-1]
     
     # אם שנת ההשקה היא אחרי תקופת המודל, כל החישובים יהיו אפס
     if launch_year <= last_model_year:
-        # --- עדכון: הצבת הערך ההתחלתי כולל S ---
         tons_per_customer.loc[launch_year] = [is_s, is_m, is_l, is_g]
 
         # חישוב תקופת המכירה האמיתית של המוצר
         sales_duration_years = last_model_year - launch_year + 1
         
-        # --- עדכון: הוספת S למילוני היעדים ---
         initial_tons = {'Small': is_s, 'Medium': is_m, 'Large': is_l, 'Global': is_g}
         target_tons = {'Small': tt_s, 'Medium': tt_m, 'Large': tt_l, 'Global': tt_g}
         
@@ -675,14 +671,13 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
             
             pen_rate_y_final = (pen_y1 / 100) * required_pen_growth_factor
             
-            # התאמת נקודות האינטרפולציה לתקופה הדינמית
             interp_points_x = [1, sales_duration_years / 2, sales_duration_years] if sales_duration_years > 2 else [1, sales_duration_years]
             interp_points_y = [pen_y1 / 100, (pen_y1/100 + pen_rate_y_final)/2, pen_rate_y_final] if sales_duration_years > 2 else [pen_y1 / 100, pen_rate_y_final]
             
             interp_func = PchipInterpolator(interp_points_x, interp_points_y)
             pen_rate_df_relative[c_type] = interp_func(relative_year_index)
 
-        # הרצת לולאת הצמיחה רק על השנים הרלוונטיות
+        # הרצת לולאת הצמיחה
         launch_year_index_in_years_array = list(years).index(launch_year)
         for i in range(launch_year_index_in_years_array, NUM_YEARS - 1):
             current_year, prev_year = years[i+1], years[i]
@@ -696,7 +691,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     pen_rate_df = pen_rate_df_relative if launch_year <= last_model_year else pd.DataFrame(0.0, index=range(1, NUM_YEARS + 1), columns=customer_types)
 
-    # --- חישוב מחירים (ללא שינוי) ---
+    # --- חישוב מחירים ---
     prices = []
     current_price = ip_kg
     decay_rate = pdr / 100.0
@@ -721,20 +716,35 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     global_start_date = pd.Timestamp(f"{global_start_year}-{(global_start_quarter-1)*3 + 1}-01")
     product_launch_date = pd.Timestamp(f"{launch_year}-01-01")
-    
     effective_start_date = max(global_start_date, product_launch_date)
-    
     quarterly_rev_targets.loc[quarterly_rev_targets.index < effective_start_date] = 0
-    
-    # --- עדכון: הוספת S לחישוב הפוקוס ---
-    total_focus = f_s + f_m + f_l + f_g
-    if total_focus == 0: return {"error": "Total Sales Focus must be greater than 0."}
-    focus_norm = {'Small': f_s/total_focus, 'Medium': f_m/total_focus, 'Large': f_l/total_focus, 'Global': f_g/total_focus}
     
     new_customers_plan = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     cumulative_customers = pd.DataFrame(0.0, index=quarters_index, columns=customer_types)
     
+    # --- תחילת הלולאה הראשית עם התיקון של Global Delay ---
     for i, q_date in enumerate(quarters_index):
+        
+        # 1. בדיקה האם הגענו לשנת הגיוס של גלובל
+        if q_date.year < global_delay_year:
+            current_f_g = 0 # אם אנחנו לפני השנה, אין מיקוד בגלובל
+        else:
+            current_f_g = f_g # אחרת, המיקוד הוא מה שהוגדר
+            
+        # 2. חישוב הפוקוס היחסי לרבעון זה
+        current_total_focus = f_s + f_m + f_l + current_f_g
+        
+        if current_total_focus > 0:
+            focus_norm = {
+                'Small': f_s / current_total_focus,
+                'Medium': f_m / current_total_focus,
+                'Large': f_l / current_total_focus,
+                'Global': current_f_g / current_total_focus
+            }
+        else:
+            focus_norm = {'Small': 0, 'Medium': 0, 'Large': 0, 'Global': 0}
+
+        # 3. המשך החישוב הרגיל
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         value_per_customer_type = tons_per_cust_q.loc[q_date] * price_per_ton_q.loc[q_date]
         revenue_from_existing = (value_per_customer_type * prev_cumulative).sum()
@@ -784,7 +794,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         "total_production_cost_q": total_cost_q,
         "tons_per_customer": tons_per_customer,
         "pen_rate_df": pen_rate_df,
-        "lead_plan": pd.DataFrame(), # פלייסהולדר, מחושב בחוץ
+        "lead_plan": pd.DataFrame(),
         "acquired_customers_plan": new_customers_plan,
         "error": None
     }
@@ -1019,6 +1029,15 @@ with st.sidebar:
             product_inputs[product]['f_m'] = st.slider('Medium:', 0, 100, st.session_state.get(f'f_m_{product}', 30), 5, key=f'f_m_{product}')
             product_inputs[product]['f_l'] = st.slider('Large:', 0, 100, st.session_state.get(f'f_l_{product}', 15), 5, key=f'f_l_{product}')
             product_inputs[product]['f_g'] = st.slider('Global:', 0, 100, st.session_state.get(f'f_g_{product}', 5), 5, key=f'f_g_{product}')
+
+            st.markdown("---")
+            st.markdown("**Global Launch Strategy**")
+            product_inputs[product]['global_delay_year'] = st.selectbox(
+                'Start Recruiting Global Customers from Year:', 
+                options=[2025, 2026, 2027, 2028, 2029, 2030], 
+                index=0, 
+                key=f'g_delay_{product}'
+            )
             
         with st.expander(f"4. Pricing Assumptions", expanded=False):
             product_inputs[product]['ip_kg'] = st.number_input('Initial Price per Kg ($):', 0.0, value=st.session_state.get(f'ip_kg_{product}', 18.0), step=0.5, key=f'ip_kg_{product}')
