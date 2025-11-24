@@ -647,19 +647,16 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     
     customer_types = ['Small', 'Medium', 'Large', 'Global']
     
-    # --- תיקון קריטי: מיון בטוח של המחירון ---
-    # אנחנו מחברים את הכמות והמחיר לזוגות, ממיינים לפי כמות, ואז מפרידים חזרה
-    # זה מבטיח שאם המשתמש הזין בסדר מבולגן, המחשב יבין נכון
+    # מיון נתונים
     price_pairs = sorted(zip(price_quantities_t, price_values_per_kg))
     sorted_price_quantities = [p[0] for p in price_pairs]
     sorted_price_values = [p[1] for p in price_pairs]
 
-    # מיון עלויות ייצור (אותו עיקרון)
     cost_pairs = sorted(zip(cost_quantities_t, cost_values_per_kg))
     sorted_cost_quantities = [c[0] for c in cost_pairs]
     sorted_cost_values = [c[1] for c in cost_pairs]
     
-    # --- חלק 1: חישוב מנועי הערך (ללא שינוי) ---
+    # --- חלק 1: חישוב מנועי הערך ---
     tons_per_customer = pd.DataFrame(0.0, index=years, columns=customer_types, dtype=float)
     last_model_year = years[-1]
     
@@ -718,6 +715,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         else:
             current_f_g = f_g
         current_total_focus = f_s + f_m + f_l + current_f_g
+        
         if current_total_focus > 0:
             focus_norm = {'Small': f_s/current_total_focus, 'Medium': f_m/current_total_focus, 'Large': f_l/current_total_focus, 'Global': current_f_g/current_total_focus}
         else:
@@ -726,20 +724,18 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         prev_cumulative = cumulative_customers.iloc[i-1] if i > 0 else pd.Series(0.0, index=customer_types)
         current_tons_per_cust = tons_per_cust_q.loc[q_date]
         
-        # חישוב הנפח הקובע את המחיר (נפח מלקוחות קיימים)
+        # מחיר לפי נפח קיים
         existing_tons_vol = (prev_cumulative * current_tons_per_cust).sum()
         
-        # שליפת המחיר המתאים
-        if sorted_price_quantities: # מוודא שיש מחירון
+        if sorted_price_quantities:
             if existing_tons_vol > 0:
                 p_idx = np.searchsorted(sorted_price_quantities, existing_tons_vol, side='right') - 1
                 current_price_kg = sorted_price_values[p_idx] if p_idx >= 0 else sorted_price_values[0]
             else:
-                # ברבעון הראשון, או כשאין מכירות, לוקחים את המחיר של כמות 0 (או הכי נמוכה)
                 current_price_kg = sorted_price_values[0]
         else:
-             current_price_kg = 0 # Fallback safety
-            
+             current_price_kg = 0
+
         final_price_per_ton_q.loc[q_date] = current_price_kg * 1000
 
         value_per_customer_type = current_tons_per_cust * (current_price_kg * 1000)
@@ -755,15 +751,20 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
                     
         cumulative_customers.loc[q_date] = prev_cumulative + new_customers_plan.loc[q_date]
 
-    # --- חישוב פלטים ---
+    # --- חלק 3: חישוב פלטים - התיקון הקריטי כאן ---
+    
+    # חישוב הכנסות מדויק: טונות * מחיר לטון (ללא חילוק ב-1000)
     revenue_per_customer_type_q = tons_per_cust_q.mul(final_price_per_ton_q, axis=0)
     actual_revenue_q = (revenue_per_customer_type_q * cumulative_customers.round().astype(int)).sum(axis=1)
 
     tons_by_type_q = tons_per_cust_q * cumulative_customers.round().astype(int)
-    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q / 1000, axis=0)
+    
+    # פירוט הכנסות לפי סוג לקוח (גם כאן ללא חילוק ב-1000)
+    revenue_by_type_q = tons_by_type_q.mul(final_price_per_ton_q, axis=0) 
     
     total_tons_q = tons_by_type_q.sum(axis=1)
     
+    # חישוב עלויות ראשוני (יעודכן ב-Post Processing)
     cost_per_ton_q = pd.Series(0.0, index=quarters_index)
     for i, q_date in enumerate(quarters_index):
         tons_sold = total_tons_q.loc[q_date]
@@ -789,7 +790,7 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
         "pen_rate_df": pen_rate_df,
         "lead_plan": pd.DataFrame(),
         "acquired_customers_plan": new_customers_plan,
-        "final_price_per_kg_series": final_price_per_ton_q / 1000, # הוספת הנתון לבקרה
+        "final_price_per_kg_series": final_price_per_ton_q / 1000, 
         "error": None
     }
 
@@ -1115,12 +1116,10 @@ if run_button:
     results_data = {}
     products_list = st.session_state.get('products', []).copy()
     
-    # שלב 1: חישוב ראשוני עבור כל המוצרים (כדי להשיג את הכמויות)
+    # שלב 1: חישוב ראשוני
     for product in products_list:
-        # שליפת נתוני הקלט
         inputs = product_inputs[product]
         
-        # הרצת החישוב (העלות שתחושב פה היא זמנית ותתוקן בהמשך)
         res = calculate_plan(
             **inputs, 
             global_start_year=model_start_year, 
@@ -1130,7 +1129,6 @@ if run_button:
         if res.get("error"):
             st.error(f"Error for {product}: {res['error']}"); st.stop()
         
-        # חישוב הלידים (לא משתנה)
         final_cumulative = res["cumulative_customers"].round().astype(int)
         acquired_customers = final_cumulative.diff(axis=0).fillna(final_cumulative.iloc[0]).clip(lower=0).astype(int)
         res['acquired_customers_plan'] = acquired_customers
@@ -1139,36 +1137,32 @@ if run_button:
         
         results_data[product] = res
 
-    # --- שלב 2: תיקון עלויות ייצור לפי נפח גלובלי (כלל המוצרים) ---
+    # --- שלב 2: תיקון עלויות ייצור לפי נפח גלובלי (Economies of Scale) ---
     
-    # א. יצירת טבלה שמסכמת את כל הטונות מכל המוצרים בכל רבעון
+    # א. סכימת הטונות של כל המוצרים יחד לכל רבעון
     all_tons_df = pd.DataFrame({
         p: res['tons_by_type_q'].sum(axis=1) for p, res in results_data.items()
     })
-    # סכום הטונות הגלובלי לכל רבעון (Product A + Product B + ...)
     global_tons_q = all_tons_df.sum(axis=1)
 
-    # ב. חישוב מחדש של העלויות והרווח לכל מוצר
+    # ב. חישוב מחדש של העלויות
     for product in products_list:
         res = results_data[product]
         
-        # שליפת טבלת העלויות הספציפית של המוצר הזה
+        # טעינת טבלת העלויות של המוצר
         cost_quantities = product_inputs[product]['cost_quantities_t']
         cost_values = product_inputs[product]['cost_values_per_kg']
         
-        # מיון בטוח של טבלת העלויות (למקרה שהמשתמש הזין לא לפי הסדר)
+        # מיון
         cost_pairs = sorted(zip(cost_quantities, cost_values))
         sorted_cost_quantities = [c[0] for c in cost_pairs]
         sorted_cost_values = [c[1] for c in cost_pairs]
         
-        # סדרה חדשה לעלות לק"ג (מחושבת לפי הנפח הגלובלי!)
         new_cost_per_ton_q = pd.Series(0.0, index=res['total_production_cost_q'].index)
-        
-        # הטונות של המוצר הספציפי הזה (עליהן נכפיל את המחיר)
         product_specific_tons_q = res['tons_by_type_q'].sum(axis=1)
 
+        # לולאה לקביעת המחיר לפי הנפח הגלובלי
         for q_date in global_tons_q.index:
-            # 1. בודקים איזה מדרגת מחיר תופסת לפי *הנפח הגלובלי*
             current_global_tons = global_tons_q.loc[q_date]
             
             if current_global_tons > 0:
@@ -1177,21 +1171,17 @@ if run_button:
             else:
                 cost_per_kg = sorted_cost_values[0]
             
-            # 2. שומרים את העלות לטון (המחיר לק"ג * 1000)
             new_cost_per_ton_q.loc[q_date] = cost_per_kg * 1000
             
-        # ג. עדכון התוצאות בתוך המילון
-        # עלות כוללת = כמות ספציפית של המוצר * מחיר שנקבע לפי הכמות הכללית
+        # עדכון העלות הכוללת והרווח
         res['total_production_cost_q'] = product_specific_tons_q * new_cost_per_ton_q
         
-        # חישוב רווח מחדש: הכנסות (ללא שינוי) פחות העלות החדשה
-        total_revenue_q = res['revenue_by_type_q'].sum(axis=1) # המרה לדולרים כבר בוצעה בפונקציה
+        # חישוב רווח מעודכן: (הכנסה מתוקנת מהשלב ה-1) פחות (עלות גלובלית מהשלב ה-2)
+        total_revenue_q = res['revenue_by_type_q'].sum(axis=1)
         res['profit_q'] = total_revenue_q - res['total_production_cost_q']
         
-        # עדכון המילון הראשי
         results_data[product] = res
 
-    # שמירה ל-Session State
     st.session_state.results = results_data
 
 # <<< החלף את כל קוד התצוגה שלך (מ-if st.session_state.results: ועד הסוף) בקוד המלא הבא >>>
