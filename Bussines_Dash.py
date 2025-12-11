@@ -696,12 +696,34 @@ def calculate_plan(is_s, is_m, is_l, is_g, market_gr, pen_y1, tt_s, tt_m, tt_l, 
     tons_per_cust_q = tons_per_customer.loc[quarters_index.year].set_axis(quarters_index) / 4
 
     # --- חלק 2: מנוע החישוב ההפוך ---
-    Q_GROWTH_RATE = 0.10
-    growth_factors = np.array([1, (1 + Q_GROWTH_RATE), (1 + Q_GROWTH_RATE)**2, (1 + Q_GROWTH_RATE)**3])
-    quarterly_weights = growth_factors / growth_factors.sum()
     quarterly_rev_targets_list = []
-    for yearly_target in annual_rev_targets:
-        quarterly_rev_targets_list.extend(yearly_target * quarterly_weights)
+    
+    # אנו רצים על כל שנה בנפרד כדי לקבוע לה קצב צמיחה ייחודי
+    for i, yearly_target in enumerate(annual_rev_targets):
+        current_year_calc = CALCULATION_START_YEAR + i
+        
+        # לוגיקה: כמה אגרסיבית הצמיחה בתוך השנה?
+        if current_year_calc <= launch_year:
+            # שנת השקה: צמיחה חדה מאוד (התחלה נמוכה, סוף גבוה)
+            # זה יגרום לרבעון הראשון להיות נמוך משמעותית
+            current_q_growth = 0.60 
+            
+        elif current_year_calc == launch_year + 1:
+            # שנה שנייה: צמיחה מתונה
+            current_q_growth = 0.20
+            
+        else:
+            # שנים מתקדמות: יציבות (כמעט ללא הבדל בין רבעונים)
+            current_q_growth = 0.05
+
+        # חישוב המשקולות הספציפי לשנה זו
+        factors = np.array([1, (1 + current_q_growth), (1 + current_q_growth)**2, (1 + current_q_growth)**3])
+        weights = factors / factors.sum()
+        
+        # הוספה לרשימה הכללית
+        quarterly_rev_targets_list.extend(yearly_target * weights)
+
+    # המרה לסדרה עם תאריכים (בדיוק כמו שהיה קודם)
     quarterly_rev_targets = pd.Series(quarterly_rev_targets_list, index=quarters_index)
     
     global_start_date = pd.Timestamp(f"{global_start_year}-{(global_start_quarter-1)*3 + 1}-01")
